@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
 interface StockScore {
+  stock_id: string
   stock_symbol: string
   opportunity_score: number
   recommendation: string
@@ -41,12 +42,24 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   const [analysis, setAnalysis] = useState<Analysis | null>(null)
   const [stocks, setStocks] = useState<StockScore[]>([])
   const [loading, setLoading] = useState(true)
+  const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [watchedIds, setWatchedIds] = useState<Set<string>>(new Set())
+  const [watchingId, setWatchingId] = useState<string | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
   const router = useRouter()
   const supabase = createClient()
 
   useEffect(() => {
     const fetchAnalysis = async () => {
       try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          router.push('/auth/login')
+          return
+        }
+        setUserId(user.id)
+
         const { data: analysisData } = await supabase
           .from('event_analysis')
           .select('*')
@@ -56,15 +69,28 @@ export default function EventDetails({ params }: { params: { id: string } }) {
         if (analysisData) {
           setAnalysis(analysisData)
 
-          // Fetch stock scores
-          const { data: stockData } = await supabase
-            .from('stock_scores')
-            .select('*')
-            .eq('event_analysis_id', params.id)
-            .order('opportunity_score', { ascending: false })
-            .limit(10)
+          const [{ data: stockData }, { data: savedRow }, { data: watchRows }] = await Promise.all([
+            supabase
+              .from('stock_scores')
+              .select('*')
+              .eq('event_analysis_id', params.id)
+              .order('opportunity_score', { ascending: false })
+              .limit(10),
+            supabase
+              .from('saved_analyses')
+              .select('id')
+              .eq('event_analysis_id', params.id)
+              .eq('user_id', user.id)
+              .maybeSingle(),
+            supabase
+              .from('watchlists')
+              .select('stock_id')
+              .eq('user_id', user.id),
+          ])
 
           setStocks(stockData || [])
+          setSaved(!!savedRow)
+          setWatchedIds(new Set((watchRows || []).map((w: any) => w.stock_id)))
         }
       } catch (error) {
         console.error('Error fetching analysis:', error)
@@ -75,6 +101,32 @@ export default function EventDetails({ params }: { params: { id: string } }) {
 
     fetchAnalysis()
   }, [params.id])
+
+  async function handleSaveAnalysis() {
+    if (!userId || !analysis || saved) return
+    setSaving(true)
+    const { error } = await supabase.from('saved_analyses').insert({
+      user_id: userId,
+      event_analysis_id: analysis.id,
+      title: analysis.event_title,
+      is_favorite: true,
+    })
+    if (!error) setSaved(true)
+    setSaving(false)
+  }
+
+  async function handleWatch(stockId: string) {
+    if (!userId || watchedIds.has(stockId)) return
+    setWatchingId(stockId)
+    const { error } = await supabase.from('watchlists').insert({
+      user_id: userId,
+      stock_id: stockId,
+    })
+    if (!error) {
+      setWatchedIds((prev) => new Set(prev).add(stockId))
+    }
+    setWatchingId(null)
+  }
 
   if (loading) {
     return (
@@ -115,10 +167,15 @@ export default function EventDetails({ params }: { params: { id: string } }) {
             ← Dashboard
           </button>
           <button
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
-            onClick={() => alert('✓ Analysis saved!')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              saved
+                ? 'bg-green-100 text-green-700 cursor-default'
+                : 'bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50'
+            }`}
+            onClick={handleSaveAnalysis}
+            disabled={saved || saving}
           >
-            Save Analysis
+            {saved ? '✓ Saved' : saving ? 'Saving...' : 'Save Analysis'}
           </button>
         </div>
       </header>
@@ -281,6 +338,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
                     <th className="text-center py-3 px-4 text-gray-700 font-semibold">Valuation</th>
                     <th className="text-center py-3 px-4 text-gray-700 font-semibold">Technical</th>
                     <th className="text-center py-3 px-4 text-gray-700 font-semibold">Risk</th>
+                    <th className="text-center py-3 px-4 text-gray-700 font-semibold">Watch</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -314,6 +372,23 @@ export default function EventDetails({ params }: { params: { id: string } }) {
                         }`}>
                           {stock.risk_level || 'N/A'}
                         </span>
+                      </td>
+                      <td className="py-4 px-4 text-center">
+                        <button
+                          onClick={() => handleWatch(stock.stock_id)}
+                          disabled={watchedIds.has(stock.stock_id) || watchingId === stock.stock_id}
+                          className={`text-xs font-medium px-2.5 py-1 rounded-full ${
+                            watchedIds.has(stock.stock_id)
+                              ? 'bg-green-100 text-green-700 cursor-default'
+                              : 'bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50'
+                          }`}
+                        >
+                          {watchedIds.has(stock.stock_id)
+                            ? '✓ Watching'
+                            : watchingId === stock.stock_id
+                              ? '...'
+                              : '+ Watch'}
+                        </button>
                       </td>
                     </tr>
                   ))}
