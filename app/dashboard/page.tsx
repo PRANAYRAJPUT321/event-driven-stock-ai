@@ -6,9 +6,18 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import type { User } from '@supabase/supabase-js'
 
+interface RecentAnalysis {
+  id: string
+  event_title: string
+  recommendation: string | null
+  opportunity_score: number | null
+  created_at: string
+}
+
 export default function Dashboard() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const [recent, setRecent] = useState<RecentAnalysis[]>([])
   const router = useRouter()
   const supabase = createClient()
 
@@ -17,9 +26,18 @@ export default function Dashboard() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) {
         router.push('/auth/login')
-      } else {
-        setUser(session.user)
+        return
       }
+      setUser(session.user)
+
+      const { data } = await supabase
+        .from('event_analysis')
+        .select('id, event_title, recommendation, opportunity_score, created_at')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+        .limit(5)
+
+      setRecent(data || [])
       setLoading(false)
     }
     getUser()
@@ -93,6 +111,48 @@ export default function Dashboard() {
               <p className="text-gray-600">Manage your profile and preferences</p>
             </div>
           </Link>
+        </div>
+
+        {/* Recent Analyses */}
+        <div className="bg-white rounded-lg shadow-lg p-8 mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-2xl font-bold text-gray-900">Recent Analyses</h2>
+            {recent.length > 0 && (
+              <Link href="/history" className="text-blue-600 hover:underline text-sm font-medium">
+                View all →
+              </Link>
+            )}
+          </div>
+          {recent.length === 0 ? (
+            <p className="text-gray-500 text-sm py-4">
+              No analyses yet — <Link href="/analyze" className="text-blue-600 hover:underline">analyze your first event</Link> to see it here.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {recent.map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => router.push(`/events/${r.id}`)}
+                  className="w-full text-left flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition"
+                >
+                  <span className="text-gray-800 text-sm">{r.event_title}</span>
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                    <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full text-xs font-bold">
+                      {(r.opportunity_score || 0).toFixed(0)}
+                    </span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                      r.recommendation === 'BUY' ? 'bg-green-100 text-green-800' :
+                      r.recommendation === 'HOLD' ? 'bg-yellow-100 text-yellow-800' :
+                      r.recommendation === 'AVOID' ? 'bg-red-100 text-red-800' :
+                      'bg-gray-100 text-gray-600'
+                    }`}>
+                      {r.recommendation || 'PENDING'}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Info Section */}
