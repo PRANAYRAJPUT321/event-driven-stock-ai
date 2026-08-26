@@ -44,12 +44,21 @@ export async function POST(request: NextRequest) {
     const fresh = hashed.filter((h) => !existingHashes.has(h.hash)).slice(0, MAX_TO_CATEGORIZE)
 
     let inserted = 0
+    let categorizeFailures = 0
+    let lastCategorizeError: any = null
     for (const { article, hash } of fresh) {
       let categorization
       try {
         categorization = await categorizeNewsItem(article.title, article.description || '')
-      } catch {
-        continue // skip articles the AI fails to categorize rather than failing the whole batch
+      } catch (err) {
+        // Skip articles the AI fails to categorize rather than failing the whole
+        // batch — but if EVERY article in this batch fails, that's a systemic
+        // problem (bad API key, no credits, model unavailable), not 12 unlucky
+        // articles, and the caller needs to see that instead of a silent "0
+        // relevant" result.
+        categorizeFailures++
+        lastCategorizeError = err
+        continue
       }
 
       if (!categorization.is_market_relevant) continue
@@ -69,6 +78,13 @@ export async function POST(request: NextRequest) {
       })
 
       if (!insertError) inserted++
+    }
+
+    if (fresh.length > 0 && categorizeFailures === fresh.length) {
+      return NextResponse.json(
+        { error: `AI categorization failed for every article: ${lastCategorizeError?.message || 'unknown error'}` },
+        { status: 502 }
+      )
     }
 
     return NextResponse.json({
