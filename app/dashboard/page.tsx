@@ -85,6 +85,15 @@ export default function Dashboard() {
             </div>
           </Link>
 
+          {/* Discover Card */}
+          <Link href="/discover">
+            <div className="bg-white rounded-lg shadow-lg p-8 hover:shadow-xl transition cursor-pointer">
+              <div className="text-4xl mb-4">📰</div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">Discover Market News</h2>
+              <p className="text-gray-600">Browse live, auto-categorized financial news and analyze any event</p>
+            </div>
+          </Link>
+
           {/* Watchlist Card */}
           <Link href="/watchlist">
             <div className="bg-white rounded-lg shadow-lg p-8 hover:shadow-xl transition cursor-pointer">

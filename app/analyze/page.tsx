@@ -1,13 +1,39 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 
-export default function Analyze() {
+interface NewsSource {
+  id: string
+  title: string
+  description: string | null
+  url: string
+  source: string
+  event_type: string | null
+}
+
+function AnalyzeForm() {
   const [eventText, setEventText] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [newsSource, setNewsSource] = useState<NewsSource | null>(null)
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const newsId = searchParams.get('news_id')
+  const supabase = createClient()
+
+  useEffect(() => {
+    if (!newsId) return
+    const loadNews = async () => {
+      const { data } = await supabase.from('news_feeds').select('*').eq('id', newsId).single()
+      if (data) {
+        setNewsSource(data)
+        setEventText(`${data.title}${data.description ? '\n\n' + data.description : ''}`)
+      }
+    }
+    loadNews()
+  }, [newsId])
 
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -28,7 +54,7 @@ export default function Analyze() {
 
       if (!response.ok) throw new Error('Analysis failed')
       const data = await response.json()
-      
+
       // Redirect to results page with analysis ID
       router.push(`/events/${data.analysisId}`)
     } catch (err: any) {
@@ -59,6 +85,23 @@ export default function Analyze() {
           <p className="text-gray-600 mb-8">
             Enter a financial event and our AI will analyze its impact on Indian stocks
           </p>
+
+          {newsSource && (
+            <div className="bg-blue-50 border-l-4 border-blue-500 rounded-lg p-4 mb-6">
+              <p className="text-xs text-blue-600 font-medium uppercase tracking-wide mb-1">
+                Analyzing from news source
+              </p>
+              <p className="font-semibold text-gray-900 text-sm">{newsSource.title}</p>
+              <a
+                href={newsSource.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 hover:underline text-xs mt-1 inline-block"
+              >
+                {newsSource.source} — read full article →
+              </a>
+            </div>
+          )}
 
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6">
@@ -92,27 +135,46 @@ export default function Analyze() {
           </form>
 
           {/* Quick Examples */}
-          <div className="mt-12 pt-8 border-t">
-            <h3 className="font-semibold text-gray-900 mb-4">Recent Events</h3>
-            <div className="grid md:grid-cols-2 gap-4">
-              {[
-                'RBI raises repo rate by 25 basis points',
-                'Crude oil prices surge 10%',
-                'Major tech company announces Q3 earnings beat',
-                'Budget announcement increases tax on FDI',
-              ].map((event, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setEventText(event)}
-                  className="text-left p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition"
-                >
-                  <p className="text-sm text-gray-700">{event}</p>
-                </button>
-              ))}
+          {!newsSource && (
+            <div className="mt-12 pt-8 border-t">
+              <h3 className="font-semibold text-gray-900 mb-4">Recent Events</h3>
+              <div className="grid md:grid-cols-2 gap-4">
+                {[
+                  'RBI raises repo rate by 25 basis points',
+                  'Crude oil prices surge 10%',
+                  'Major tech company announces Q3 earnings beat',
+                  'Budget announcement increases tax on FDI',
+                ].map((event, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setEventText(event)}
+                    className="text-left p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition"
+                  >
+                    <p className="text-sm text-gray-700">{event}</p>
+                  </button>
+                ))}
+              </div>
             </div>
+          )}
+
+          <div className="mt-6 text-center">
+            <button
+              onClick={() => router.push('/discover')}
+              className="text-blue-600 hover:underline text-sm font-medium"
+            >
+              Or browse live market news →
+            </button>
           </div>
         </div>
       </main>
     </div>
+  )
+}
+
+export default function Analyze() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+      <AnalyzeForm />
+    </Suspense>
   )
 }

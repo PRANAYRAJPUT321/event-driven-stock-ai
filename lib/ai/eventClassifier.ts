@@ -16,7 +16,7 @@ export interface EventClassification {
   transmission_explanation: string
 }
 
-function extractJson(text: string): any {
+export function extractJson(text: string): any {
   const jsonMatch = text.match(/\{[\s\S]*\}/)
   if (!jsonMatch) {
     throw new Error('AI response did not contain valid JSON')
@@ -118,6 +118,48 @@ Return ONLY valid JSON:
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 900,
+    messages: [{ role: 'user', content: prompt }],
+  })
+
+  const text = response.content[0].type === 'text' ? response.content[0].text : ''
+  return extractJson(text)
+}
+
+export interface NewsCategorization {
+  is_market_relevant: boolean
+  event_type: string
+  affected_sectors: string[]
+  relevance_score: number
+}
+
+/**
+ * Lightweight categorization for a raw news headline/description, used by the
+ * news discovery feed. Deliberately cheaper than classifyEvent() (smaller
+ * prompt, fewer tokens) since this runs on every fetched article, not just
+ * ones the user chooses to analyze.
+ */
+export async function categorizeNewsItem(
+  title: string,
+  description: string
+): Promise<NewsCategorization> {
+  const prompt = `
+Classify this news headline for an Indian equity market intelligence platform.
+
+Title: "${title}"
+Description: "${description || 'N/A'}"
+
+Return ONLY valid JSON (no markdown):
+{
+  "is_market_relevant": true or false — is this relevant to Indian financial markets/economy?,
+  "event_type": "MONETARY_POLICY|INFLATION|GDP|EMPLOYMENT|GOVERNMENT_POLICY|COMMODITY_SHOCK|CURRENCY|GEOPOLITICAL|EARNINGS|M&A|DIVIDEND|REGULATORY|CREDIT_RATING|MANAGEMENT_CHANGE|GLOBAL_MARKET_SHOCK|OTHER",
+  "affected_sectors": ["Banking", "IT", "Energy", "NBFC", "Realty", "Auto", "FMCG", "Pharma", "Financials", "Metals", "Telecom", "Utilities", "Engineering"],
+  "relevance_score": 0-100 — how relevant/actionable this is for an Indian equity investor
+}
+`
+
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 250,
     messages: [{ role: 'user', content: prompt }],
   })
 
