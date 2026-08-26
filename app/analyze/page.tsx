@@ -52,8 +52,8 @@ function AnalyzeForm() {
         body: JSON.stringify({ event: eventText }),
       })
 
-      if (!response.ok) throw new Error('Analysis failed')
       const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Analysis failed')
 
       // Redirect to results page with analysis ID
       router.push(`/events/${data.analysisId}`)
