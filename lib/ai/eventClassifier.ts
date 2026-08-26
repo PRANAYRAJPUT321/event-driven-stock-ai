@@ -3,7 +3,9 @@ import Anthropic from '@anthropic-ai/sdk'
 const client = new Anthropic()
 
 // Structured-JSON-only calls use Sonnet — fast and reliable for classification/extraction.
-const MODEL = 'claude-3-5-sonnet-20241022'
+// claude-3-5-sonnet-20241022 (the prior pin) has been retired; claude-sonnet-5 is the
+// current-generation equivalent for this cost/latency tier.
+const MODEL = 'claude-sonnet-5'
 
 export interface EventClassification {
   event_type: string
