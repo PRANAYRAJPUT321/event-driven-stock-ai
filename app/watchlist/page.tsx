@@ -122,7 +122,11 @@ export default function Watchlist() {
 
       <div className="panel p-7">
         {loading ? (
-          <div className="text-center py-16 text-ink-faint">Loading…</div>
+          <div className="space-y-2">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="skeleton h-20" />
+            ))}
+          </div>
         ) : rows.length === 0 ? (
           <div className="text-center py-16">
             <p className="text-ink text-lg">Your watchlist is empty</p>
@@ -139,7 +143,7 @@ export default function Watchlist() {
             {rows.map((row) => (
               <div
                 key={row.id}
-                className="flex items-center justify-between border border-border rounded-lg p-4 hover:bg-surface-hover transition"
+                className="tile-hover flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-border rounded-lg p-4 hover:bg-surface-hover"
               >
                 <div className="flex-1">
                   <div className="flex items-center gap-3">

@@ -81,7 +81,11 @@ export default function History() {
 
       <div className="panel p-7">
         {loading ? (
-          <div className="text-center py-16 text-ink-faint">Loading…</div>
+          <div className="space-y-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="skeleton h-16" />
+            ))}
+          </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-16">
             <p className="text-ink text-lg">{rows.length === 0 ? 'No analyses yet' : 'No analyses match this filter'}</p>
@@ -100,7 +104,7 @@ export default function History() {
               <button
                 key={row.id}
                 onClick={() => router.push(`/events/${row.id}`)}
-                className="w-full text-left flex items-center justify-between border border-border rounded-lg p-4 hover:bg-surface-hover transition"
+                className="tile-hover w-full text-left flex items-center justify-between border border-border rounded-lg p-4 hover:bg-surface-hover"
               >
                 <div className="min-w-0">
                   <p className="font-semibold text-ink truncate">{row.event_title}</p>

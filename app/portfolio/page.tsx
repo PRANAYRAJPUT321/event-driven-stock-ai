@@ -87,7 +87,7 @@ export default function Portfolio() {
       </div>
 
       {positions.length > 0 && (
-        <div className="grid grid-cols-3 gap-4 mb-6 fade-in">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 fade-in">
           <div className="panel p-5">
             <p className="text-xs text-ink-faint uppercase tracking-wide mb-1">Positions</p>
             <p className="font-mono text-2xl font-bold text-ink mono-tabular">{positions.length}</p>
@@ -110,7 +110,11 @@ export default function Portfolio() {
 
       <div className="panel p-7">
         {loading ? (
-          <div className="text-center py-16 text-ink-faint">Loading…</div>
+          <div className="space-y-2">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="skeleton h-20" />
+            ))}
+          </div>
         ) : positions.length === 0 ? (
           <div className="text-center py-16">
             <p className="text-ink text-lg">No simulated positions yet</p>
@@ -129,7 +133,7 @@ export default function Portfolio() {
             {positions.map((p) => (
               <div
                 key={p.id}
-                className="flex items-center justify-between border border-border rounded-lg p-4 hover:bg-surface-hover transition"
+                className="tile-hover flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-border rounded-lg p-4 hover:bg-surface-hover"
               >
                 <div className="flex-1">
                   <div className="flex items-center gap-3">

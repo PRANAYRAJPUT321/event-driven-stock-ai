@@ -191,7 +191,7 @@ export default function Dashboard() {
       <div className="grid md:grid-cols-2 gap-5 mb-8">
         {NAV_CARDS.map((card) => (
           <Link key={card.href} href={card.href}>
-            <div className="panel p-7 hover:border-border-bright hover:bg-surface-hover transition cursor-pointer group h-full">
+            <div className="tile-hover panel p-7 hover:border-border-bright hover:bg-surface-hover cursor-pointer group h-full">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-[10px] font-mono uppercase tracking-widest text-accent-bright border border-accent-dim rounded-full px-2 py-0.5">
                   {card.tag}
@@ -231,7 +231,7 @@ export default function Dashboard() {
               <button
                 key={r.id}
                 onClick={() => router.push(`/events/${r.id}`)}
-                className="w-full text-left flex items-center justify-between p-3 rounded-lg hover:bg-surface-hover transition"
+                className="tile-hover w-full text-left flex items-center justify-between p-3 rounded-lg hover:bg-surface-hover"
               >
                 <span className="text-ink text-sm truncate mr-3">{r.event_title}</span>
                 <div className="flex items-center gap-2 flex-shrink-0">
@@ -260,11 +260,11 @@ export default function Dashboard() {
             </span>{' '}
             moved positive against this project&apos;s simulated price model.
           </p>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {(['BUY', 'HOLD', 'AVOID'] as const).map((rec) => {
               const entry = trackRecord.byRec[rec]
               return (
-                <div key={rec} className="border border-border rounded-lg p-4">
+                <div key={rec} className="tile-hover border border-border rounded-lg p-4">
                   <RecommendationBadge rec={rec} size="sm" />
                   <p className="font-mono text-xl font-bold text-ink mono-tabular mt-2">
                     {entry ? `${Math.round((entry.positive / entry.count) * 100)}%` : '—'}
@@ -292,7 +292,7 @@ export default function Dashboard() {
             How every sector your analyses have touched has tilted, by recommendation.
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-            {sectorTilts.map((s) => {
+            {sectorTilts.map((s, idx) => {
               const alpha = Math.min(Math.abs(s.tilt), 1) * 0.5 + 0.08
               const [r, g, b] = s.tilt >= 0 ? [52, 211, 153] : [248, 113, 113]
               return (
@@ -301,8 +301,9 @@ export default function Dashboard() {
                   style={{
                     background: `rgba(${r}, ${g}, ${b}, ${alpha})`,
                     borderColor: `rgba(${r}, ${g}, ${b}, ${Math.min(alpha + 0.25, 0.9)})`,
+                    animationDelay: `${Math.min(idx * 30, 300)}ms`,
                   }}
-                  className="rounded-xl border p-4 transition hover:-translate-y-0.5 hover:shadow-panel"
+                  className="tile-hover fade-in rounded-xl border p-4"
                 >
                   <p className="font-bold text-ink text-sm mb-1 truncate" title={s.sector}>
                     {s.sector}

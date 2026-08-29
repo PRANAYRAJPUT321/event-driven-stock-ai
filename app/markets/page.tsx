@@ -157,7 +157,11 @@ export default function Markets() {
       </div>
 
       {loading ? (
-        <div className="text-center py-16 text-ink-faint">Loading…</div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="skeleton h-28" />
+          ))}
+        </div>
       ) : active.length === 0 ? (
         <div className="panel p-10 text-center text-ink-muted">
           <p className="text-lg mb-2 text-ink">No market data cached yet</p>
@@ -175,11 +179,11 @@ export default function Markets() {
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {active.map((s) => (
+          {active.map((s, idx) => (
             <div
               key={s.id}
-              style={heatStyle(s.change_pct, tab)}
-              className="rounded-xl border p-4 transition hover:-translate-y-0.5 hover:shadow-panel"
+              style={{ ...heatStyle(s.change_pct, tab), animationDelay: `${Math.min(idx * 30, 300)}ms` }}
+              className="tile-hover fade-in rounded-xl border p-4"
             >
               <p className="font-mono text-[10px] uppercase tracking-wide text-ink-faint mb-1">
                 {s.region || s.symbol}
