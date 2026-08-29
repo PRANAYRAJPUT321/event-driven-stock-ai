@@ -12,6 +12,7 @@ const NAV = [
   { href: '/discover', label: 'Discover' },
   { href: '/analyze', label: 'Analyze' },
   { href: '/markets', label: 'Markets' },
+  { href: '/portfolio', label: 'Portfolio' },
   { href: '/watchlist', label: 'Watchlist' },
   { href: '/history', label: 'History' },
   { href: '/settings', label: 'Settings' },

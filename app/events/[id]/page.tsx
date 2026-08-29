@@ -9,9 +9,11 @@ import TransmissionFlow from '@/components/charts/TransmissionFlow'
 import ReturnSparkline from '@/components/charts/ReturnSparkline'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import ScoreChip from '@/components/ui/ScoreChip'
+import { getMockTechnical } from '@/lib/market/mockData'
 import type { User } from '@supabase/supabase-js'
 
 interface StockScore {
+  id: string
   stock_id: string
   stock_symbol: string
   opportunity_score: number
@@ -68,6 +70,8 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   const [saving, setSaving] = useState(false)
   const [watchedIds, setWatchedIds] = useState<Set<string>>(new Set())
   const [watchingId, setWatchingId] = useState<string | null>(null)
+  const [positionedIds, setPositionedIds] = useState<Set<string>>(new Set())
+  const [positioningId, setPositioningId] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
   const [user, setUser] = useState<User | null>(null)
   const router = useRouter()
@@ -93,7 +97,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
         if (analysisData) {
           setAnalysis(analysisData)
 
-          const [{ data: stockData }, { data: savedRow }, { data: watchRows }] = await Promise.all([
+          const [{ data: stockData }, { data: savedRow }, { data: watchRows }, { data: positionRows }] = await Promise.all([
             supabase
               .from('stock_scores')
               .select('*')
@@ -107,11 +111,17 @@ export default function EventDetails({ params }: { params: { id: string } }) {
               .eq('user_id', user.id)
               .maybeSingle(),
             supabase.from('watchlists').select('stock_id').eq('user_id', user.id),
+            supabase
+              .from('portfolio_positions')
+              .select('stock_scores_id')
+              .eq('event_analysis_id', params.id)
+              .eq('user_id', user.id),
           ])
 
           setStocks(stockData || [])
           setSaved(!!savedRow)
           setWatchedIds(new Set((watchRows || []).map((w: any) => w.stock_id)))
+          setPositionedIds(new Set((positionRows || []).map((p: any) => p.stock_scores_id)))
         }
       } catch (error) {
         console.error('Error fetching analysis:', error)
@@ -142,6 +152,23 @@ export default function EventDetails({ params }: { params: { id: string } }) {
     const { error } = await supabase.from('watchlists').insert({ user_id: userId, stock_id: stockId })
     if (!error) setWatchedIds((prev) => new Set(prev).add(stockId))
     setWatchingId(null)
+  }
+
+  async function handleSimulate(stock: StockScore) {
+    if (!userId || !analysis || positionedIds.has(stock.id)) return
+    setPositioningId(stock.id)
+    const entryPrice = getMockTechnical(stock.stock_symbol).price
+    const { error } = await supabase.from('portfolio_positions').insert({
+      user_id: userId,
+      stock_scores_id: stock.id,
+      event_analysis_id: analysis.id,
+      stock_id: stock.stock_id,
+      symbol: stock.stock_symbol,
+      recommendation: stock.recommendation,
+      entry_price: entryPrice,
+    })
+    if (!error) setPositionedIds((prev) => new Set(prev).add(stock.id))
+    setPositioningId(null)
   }
 
   const handleLogout = async () => {
@@ -178,7 +205,13 @@ export default function EventDetails({ params }: { params: { id: string } }) {
 
   return (
     <AppShell userEmail={user?.email} onLogout={handleLogout} showTicker={false}>
-      <div className="flex justify-end mb-4">
+      <div className="flex justify-end items-center gap-3 mb-4">
+        <button
+          onClick={() => router.push('/portfolio')}
+          className="text-accent-bright hover:underline text-sm font-medium"
+        >
+          View Portfolio →
+        </button>
         <button
           onClick={handleSaveAnalysis}
           disabled={saved || saving}
@@ -338,6 +371,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
                   <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Technical</th>
                   <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Risk</th>
                   <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Watch</th>
+                  <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Simulate</th>
                 </tr>
               </thead>
               <tbody>
@@ -374,6 +408,19 @@ export default function EventDetails({ params }: { params: { id: string } }) {
                         }`}
                       >
                         {watchedIds.has(stock.stock_id) ? '✓ Watching' : watchingId === stock.stock_id ? '…' : '+ Watch'}
+                      </button>
+                    </td>
+                    <td className="py-4 px-2 text-center">
+                      <button
+                        onClick={() => handleSimulate(stock)}
+                        disabled={positionedIds.has(stock.id) || positioningId === stock.id}
+                        className={`text-[10px] font-medium px-2.5 py-1 rounded-full border transition ${
+                          positionedIds.has(stock.id)
+                            ? 'bg-hold-dim text-hold border-hold-dim cursor-default'
+                            : 'bg-surface text-accent-bright border-border hover:border-accent-dim disabled:opacity-50'
+                        }`}
+                      >
+                        {positionedIds.has(stock.id) ? '✓ In Portfolio' : positioningId === stock.id ? '…' : '📊 Simulate'}
                       </button>
                     </td>
                   </tr>

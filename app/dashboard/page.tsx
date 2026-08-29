@@ -8,6 +8,7 @@ import type { User } from '@supabase/supabase-js'
 import AppShell from '@/components/layout/AppShell'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import ScoreChip from '@/components/ui/ScoreChip'
+import { getSimulatedPrice } from '@/lib/market/mockData'
 
 interface RecentAnalysis {
   id: string
@@ -59,6 +60,11 @@ export default function Dashboard() {
   const [recent, setRecent] = useState<RecentAnalysis[]>([])
   const [stats, setStats] = useState({ total: 0, buy: 0, hold: 0, avoid: 0, avgScore: 0 })
   const [sectorTilts, setSectorTilts] = useState<SectorTilt[]>([])
+  const [trackRecord, setTrackRecord] = useState<{
+    total: number
+    positive: number
+    byRec: Record<string, { count: number; positive: number }>
+  } | null>(null)
   const router = useRouter()
   const supabase = createClient()
 
@@ -108,6 +114,32 @@ export default function Dashboard() {
         .map(([sector, v]) => ({ sector, ...v, tilt: v.count ? (v.buy - v.avoid) / v.count : 0 }))
         .sort((a, b) => b.count - a.count)
       setSectorTilts(tilts)
+
+      // Track record / calibration: how simulated paper positions (from the
+      // "Simulate" action on event detail pages) actually moved against
+      // this project's own deterministic price model, grouped by the
+      // recommendation that prompted each one — the explainability
+      // differentiator this project's README calls out, made concrete.
+      const { data: positions } = await supabase
+        .from('portfolio_positions')
+        .select('symbol, recommendation, entry_price, entry_date')
+        .eq('user_id', session.user.id)
+
+      if (positions && positions.length > 0) {
+        const byRec: Record<string, { count: number; positive: number }> = {}
+        let positive = 0
+        for (const p of positions) {
+          const current = getSimulatedPrice(p.symbol, p.entry_price, p.entry_date)
+          const isPositive = current >= p.entry_price
+          if (isPositive) positive++
+          const rec = p.recommendation || 'UNKNOWN'
+          const entry = byRec[rec] || { count: 0, positive: 0 }
+          entry.count++
+          if (isPositive) entry.positive++
+          byRec[rec] = entry
+        }
+        setTrackRecord({ total: positions.length, positive, byRec })
+      }
 
       setLoading(false)
     }
@@ -211,6 +243,41 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Track Record */}
+      {trackRecord && trackRecord.total > 0 && (
+        <div className="panel p-7 mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold text-ink">Track Record</h2>
+            <Link href="/portfolio" className="text-accent-bright hover:underline text-xs font-medium">
+              View portfolio →
+            </Link>
+          </div>
+          <p className="text-ink-muted text-xs mb-5">
+            Of {trackRecord.total} simulated position{trackRecord.total === 1 ? '' : 's'},{' '}
+            <span className="text-buy font-semibold">
+              {Math.round((trackRecord.positive / trackRecord.total) * 100)}%
+            </span>{' '}
+            moved positive against this project&apos;s simulated price model.
+          </p>
+          <div className="grid grid-cols-3 gap-4">
+            {(['BUY', 'HOLD', 'AVOID'] as const).map((rec) => {
+              const entry = trackRecord.byRec[rec]
+              return (
+                <div key={rec} className="border border-border rounded-lg p-4">
+                  <RecommendationBadge rec={rec} size="sm" />
+                  <p className="font-mono text-xl font-bold text-ink mono-tabular mt-2">
+                    {entry ? `${Math.round((entry.positive / entry.count) * 100)}%` : '—'}
+                  </p>
+                  <p className="text-[10px] text-ink-faint font-mono">
+                    {entry ? `${entry.positive}/${entry.count} positive` : 'no simulated positions'}
+                  </p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Sector Heatmap */}
       {sectorTilts.length > 0 && (
