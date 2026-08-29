@@ -17,6 +17,15 @@ interface RecentAnalysis {
   created_at: string
 }
 
+interface SectorTilt {
+  sector: string
+  count: number
+  buy: number
+  hold: number
+  avoid: number
+  tilt: number // (buy - avoid) / count, -1..1
+}
+
 const NAV_CARDS = [
   {
     href: '/analyze',
@@ -49,6 +58,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [recent, setRecent] = useState<RecentAnalysis[]>([])
   const [stats, setStats] = useState({ total: 0, buy: 0, hold: 0, avoid: 0, avgScore: 0 })
+  const [sectorTilts, setSectorTilts] = useState<SectorTilt[]>([])
   const router = useRouter()
   const supabase = createClient()
 
@@ -63,7 +73,7 @@ export default function Dashboard() {
 
       const { data } = await supabase
         .from('event_analysis')
-        .select('id, event_title, recommendation, opportunity_score, created_at')
+        .select('id, event_title, recommendation, opportunity_score, affected_sectors, created_at')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
         .limit(100)
@@ -78,6 +88,27 @@ export default function Dashboard() {
         ? all.reduce((sum, r) => sum + (r.opportunity_score || 0), 0) / all.length
         : 0
       setStats({ total: all.length, buy, hold, avoid, avgScore })
+
+      // Sector heatmap: credit every sector an analysis touched with that
+      // analysis's overall recommendation, tallying how often each sector
+      // has come up bullish vs. bearish across everything this user has
+      // analyzed — reuses data already fetched above, no extra query.
+      const bySector = new Map<string, { count: number; buy: number; hold: number; avoid: number }>()
+      for (const r of all) {
+        for (const sector of r.affected_sectors || []) {
+          const entry = bySector.get(sector) || { count: 0, buy: 0, hold: 0, avoid: 0 }
+          entry.count++
+          if (r.recommendation === 'BUY') entry.buy++
+          else if (r.recommendation === 'HOLD') entry.hold++
+          else if (r.recommendation === 'AVOID') entry.avoid++
+          bySector.set(sector, entry)
+        }
+      }
+      const tilts: SectorTilt[] = Array.from(bySector.entries())
+        .map(([sector, v]) => ({ sector, ...v, tilt: v.count ? (v.buy - v.avoid) / v.count : 0 }))
+        .sort((a, b) => b.count - a.count)
+      setSectorTilts(tilts)
+
       setLoading(false)
     }
     getUser()
@@ -180,6 +211,47 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Sector Heatmap */}
+      {sectorTilts.length > 0 && (
+        <div className="panel p-7 mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold text-ink">Sector Heatmap</h2>
+            <Link href="/markets" className="text-accent-bright hover:underline text-xs font-medium">
+              World markets →
+            </Link>
+          </div>
+          <p className="text-ink-muted text-xs mb-5">
+            How every sector your analyses have touched has tilted, by recommendation.
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {sectorTilts.map((s) => {
+              const alpha = Math.min(Math.abs(s.tilt), 1) * 0.5 + 0.08
+              const [r, g, b] = s.tilt >= 0 ? [52, 211, 153] : [248, 113, 113]
+              return (
+                <div
+                  key={s.sector}
+                  style={{
+                    background: `rgba(${r}, ${g}, ${b}, ${alpha})`,
+                    borderColor: `rgba(${r}, ${g}, ${b}, ${Math.min(alpha + 0.25, 0.9)})`,
+                  }}
+                  className="rounded-xl border p-4 transition hover:-translate-y-0.5 hover:shadow-panel"
+                >
+                  <p className="font-bold text-ink text-sm mb-1 truncate" title={s.sector}>
+                    {s.sector}
+                  </p>
+                  <p className="text-[10px] text-ink-faint font-mono">
+                    {s.count} analysis{s.count === 1 ? '' : 'es'}
+                  </p>
+                  <p className={`mono-tabular text-xs font-semibold mt-1 ${s.tilt >= 0 ? 'text-buy' : 'text-avoid'}`}>
+                    {s.buy} BUY · {s.hold} HOLD · {s.avoid} AVOID
+                  </p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* How it works */}
       <div className="panel p-7">
