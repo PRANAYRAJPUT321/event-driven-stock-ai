@@ -5,11 +5,14 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import CommandPalette from '@/components/CommandPalette'
 import MarketTicker from '@/components/MarketTicker'
+import { createClient } from '@/lib/supabase/client'
 
 const NAV = [
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/discover', label: 'Discover' },
   { href: '/analyze', label: 'Analyze' },
+  { href: '/markets', label: 'Markets' },
+  { href: '/portfolio', label: 'Portfolio' },
   { href: '/watchlist', label: 'Watchlist' },
   { href: '/history', label: 'History' },
   { href: '/settings', label: 'Settings' },
@@ -29,6 +32,7 @@ export default function AppShell({
   const pathname = usePathname()
   const router = useRouter()
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [watchlistAlerts, setWatchlistAlerts] = useState(0)
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -40,6 +44,51 @@ export default function AppShell({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  // Nav badge: count of analyzed events (since each stock was watchlisted)
+  // whose affected sectors overlap the sectors currently on the user's
+  // watchlist — same "relevant activity" signal shown per-row on the
+  // Watchlist page itself, surfaced globally so it's visible from any page.
+  useEffect(() => {
+    const supabase = createClient()
+    let active = true
+
+    async function loadAlertCount() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const { data: watched } = await supabase
+        .from('watchlists')
+        .select('created_at, stocks(sector)')
+        .eq('user_id', user.id)
+
+      const sectors = Array.from(
+        new Set((watched || []).map((w: any) => w.stocks?.sector).filter(Boolean))
+      )
+      const earliest = (watched || []).reduce(
+        (min: string | null, w: any) => (!min || w.created_at < min ? w.created_at : min),
+        null as string | null
+      )
+      if (sectors.length === 0 || !earliest) {
+        if (active) setWatchlistAlerts(0)
+        return
+      }
+
+      const { count } = await supabase
+        .from('event_analysis')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .overlaps('affected_sectors', sectors)
+        .gt('created_at', earliest)
+
+      if (active) setWatchlistAlerts(count || 0)
+    }
+
+    loadAlertCount()
+    return () => {
+      active = false
+    }
+  }, [pathname])
 
   return (
     <div className="min-h-screen grid-backdrop font-sans text-ink">
@@ -62,6 +111,11 @@ export default function AppShell({
                   }`}
                 >
                   {item.label}
+                  {item.href === '/watchlist' && watchlistAlerts > 0 && (
+                    <span className="ml-1.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-accent text-[#0a0d14] text-[10px] font-bold font-mono">
+                      {watchlistAlerts}
+                    </span>
+                  )}
                 </Link>
               ))}
             </nav>
@@ -97,6 +151,11 @@ export default function AppShell({
               }`}
             >
               {item.label}
+              {item.href === '/watchlist' && watchlistAlerts > 0 && (
+                <span className="ml-1 inline-flex items-center justify-center min-w-[14px] h-3.5 px-1 rounded-full bg-accent text-[#0a0d14] text-[9px] font-bold font-mono">
+                  {watchlistAlerts}
+                </span>
+              )}
             </Link>
           ))}
         </nav>

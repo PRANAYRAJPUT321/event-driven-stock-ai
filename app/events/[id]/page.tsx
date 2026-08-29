@@ -9,9 +9,11 @@ import TransmissionFlow from '@/components/charts/TransmissionFlow'
 import ReturnSparkline from '@/components/charts/ReturnSparkline'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import ScoreChip from '@/components/ui/ScoreChip'
+import { getMockTechnical } from '@/lib/market/mockData'
 import type { User } from '@supabase/supabase-js'
 
 interface StockScore {
+  id: string
   stock_id: string
   stock_symbol: string
   opportunity_score: number
@@ -37,6 +39,23 @@ interface ClassificationJson {
   direction: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL'
   transmission_explanation?: string
 }
+
+interface MarketSnapshot {
+  id: string
+  asset_type: 'index' | 'crypto'
+  symbol: string
+  name: string
+  region: string | null
+  price: number | null
+  change_pct: number | null
+  fetched_at: string
+}
+
+// Event types/economic variables where showing live global-market context
+// alongside the AI's own transmission-mechanism explanation actually
+// grounds the narrative in something real, rather than every event getting
+// a market strip whether it's relevant or not.
+const GLOBAL_CONTEXT_TRIGGERS = new Set(['GLOBAL_MARKET_SHOCK', 'CURRENCY', 'OIL_PRICE'])
 
 interface Analysis {
   id: string
@@ -68,6 +87,9 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   const [saving, setSaving] = useState(false)
   const [watchedIds, setWatchedIds] = useState<Set<string>>(new Set())
   const [watchingId, setWatchingId] = useState<string | null>(null)
+  const [positionedIds, setPositionedIds] = useState<Set<string>>(new Set())
+  const [positioningId, setPositioningId] = useState<string | null>(null)
+  const [marketContext, setMarketContext] = useState<MarketSnapshot[]>([])
   const [userId, setUserId] = useState<string | null>(null)
   const [user, setUser] = useState<User | null>(null)
   const router = useRouter()
@@ -93,7 +115,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
         if (analysisData) {
           setAnalysis(analysisData)
 
-          const [{ data: stockData }, { data: savedRow }, { data: watchRows }] = await Promise.all([
+          const [{ data: stockData }, { data: savedRow }, { data: watchRows }, { data: positionRows }] = await Promise.all([
             supabase
               .from('stock_scores')
               .select('*')
@@ -107,11 +129,17 @@ export default function EventDetails({ params }: { params: { id: string } }) {
               .eq('user_id', user.id)
               .maybeSingle(),
             supabase.from('watchlists').select('stock_id').eq('user_id', user.id),
+            supabase
+              .from('portfolio_positions')
+              .select('stock_scores_id')
+              .eq('event_analysis_id', params.id)
+              .eq('user_id', user.id),
           ])
 
           setStocks(stockData || [])
           setSaved(!!savedRow)
           setWatchedIds(new Set((watchRows || []).map((w: any) => w.stock_id)))
+          setPositionedIds(new Set((positionRows || []).map((p: any) => p.stock_scores_id)))
         }
       } catch (error) {
         console.error('Error fetching analysis:', error)
@@ -122,6 +150,32 @@ export default function EventDetails({ params }: { params: { id: string } }) {
 
     fetchAnalysis()
   }, [params.id])
+
+  useEffect(() => {
+    const classification = analysis?.analysis_json
+    if (!classification) return
+    const triggered =
+      GLOBAL_CONTEXT_TRIGGERS.has(classification.event_type) ||
+      GLOBAL_CONTEXT_TRIGGERS.has(classification.economic_variable)
+    if (!triggered) return
+
+    async function loadMarketContext() {
+      const { data } = await supabase
+        .from('market_snapshots')
+        .select('id, asset_type, symbol, name, region, price, change_pct, fetched_at')
+        .eq('asset_type', 'index')
+
+      // market_snapshots has one row per (asset_type, symbol) — upserted in
+      // place on refresh, so no dedup needed. Just surface the most notable
+      // moves first.
+      const sorted = [...(data || [])].sort(
+        (a, b) => Math.abs(b.change_pct ?? 0) - Math.abs(a.change_pct ?? 0)
+      )
+      setMarketContext(sorted.slice(0, 4))
+    }
+
+    loadMarketContext()
+  }, [analysis])
 
   async function handleSaveAnalysis() {
     if (!userId || !analysis || saved) return
@@ -142,6 +196,23 @@ export default function EventDetails({ params }: { params: { id: string } }) {
     const { error } = await supabase.from('watchlists').insert({ user_id: userId, stock_id: stockId })
     if (!error) setWatchedIds((prev) => new Set(prev).add(stockId))
     setWatchingId(null)
+  }
+
+  async function handleSimulate(stock: StockScore) {
+    if (!userId || !analysis || positionedIds.has(stock.id)) return
+    setPositioningId(stock.id)
+    const entryPrice = getMockTechnical(stock.stock_symbol).price
+    const { error } = await supabase.from('portfolio_positions').insert({
+      user_id: userId,
+      stock_scores_id: stock.id,
+      event_analysis_id: analysis.id,
+      stock_id: stock.stock_id,
+      symbol: stock.stock_symbol,
+      recommendation: stock.recommendation,
+      entry_price: entryPrice,
+    })
+    if (!error) setPositionedIds((prev) => new Set(prev).add(stock.id))
+    setPositioningId(null)
   }
 
   const handleLogout = async () => {
@@ -178,7 +249,13 @@ export default function EventDetails({ params }: { params: { id: string } }) {
 
   return (
     <AppShell userEmail={user?.email} onLogout={handleLogout} showTicker={false}>
-      <div className="flex justify-end mb-4">
+      <div className="flex justify-end items-center gap-3 mb-4">
+        <button
+          onClick={() => router.push('/portfolio')}
+          className="text-accent-bright hover:underline text-sm font-medium"
+        >
+          View Portfolio →
+        </button>
         <button
           onClick={handleSaveAnalysis}
           disabled={saved || saving}
@@ -229,6 +306,39 @@ export default function EventDetails({ params }: { params: { id: string } }) {
             stockSymbol={topStock?.stock_symbol}
             explanation={classification.transmission_explanation}
           />
+        </div>
+      )}
+
+      {/* Global Market Context */}
+      {marketContext.length > 0 && (
+        <div className="panel p-7 mb-6 fade-in">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-sm font-bold text-ink flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-accent" />
+              Global Market Context
+            </h2>
+            <button onClick={() => router.push('/markets')} className="text-[10px] text-accent-bright hover:underline">
+              Full heatmap →
+            </button>
+          </div>
+          <p className="text-xs text-ink-faint mb-4">
+            This event&apos;s classification ({classification?.economic_variable || classification?.event_type}) is
+            the kind that transmits through world markets — here&apos;s how major indices stood as of the last refresh.
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {marketContext.map((s) => (
+              <div key={s.id} className="border border-border rounded-lg p-3">
+                <p className="font-mono text-[10px] text-ink-faint uppercase truncate">{s.region || s.symbol}</p>
+                <p className="font-semibold text-ink text-xs truncate" title={s.name}>
+                  {s.name}
+                </p>
+                <p className={`mono-tabular text-sm font-bold ${(s.change_pct ?? 0) >= 0 ? 'text-buy' : 'text-avoid'}`}>
+                  {(s.change_pct ?? 0) >= 0 ? '+' : ''}
+                  {s.change_pct?.toFixed(2)}%
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -338,6 +448,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
                   <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Technical</th>
                   <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Risk</th>
                   <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Watch</th>
+                  <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Simulate</th>
                 </tr>
               </thead>
               <tbody>
@@ -374,6 +485,19 @@ export default function EventDetails({ params }: { params: { id: string } }) {
                         }`}
                       >
                         {watchedIds.has(stock.stock_id) ? '✓ Watching' : watchingId === stock.stock_id ? '…' : '+ Watch'}
+                      </button>
+                    </td>
+                    <td className="py-4 px-2 text-center">
+                      <button
+                        onClick={() => handleSimulate(stock)}
+                        disabled={positionedIds.has(stock.id) || positioningId === stock.id}
+                        className={`text-[10px] font-medium px-2.5 py-1 rounded-full border transition ${
+                          positionedIds.has(stock.id)
+                            ? 'bg-hold-dim text-hold border-hold-dim cursor-default'
+                            : 'bg-surface text-accent-bright border-border hover:border-accent-dim disabled:opacity-50'
+                        }`}
+                      >
+                        {positionedIds.has(stock.id) ? '✓ In Portfolio' : positioningId === stock.id ? '…' : '📊 Simulate'}
                       </button>
                     </td>
                   </tr>

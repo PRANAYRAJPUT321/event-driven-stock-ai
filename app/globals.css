@@ -157,3 +157,45 @@ body {
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
+
+/* ---- interactive tile / card hover + press ----
+   One shared micro-interaction for every clickable card/tile (heatmap
+   tiles, watchlist rows, nav cards, portfolio positions) instead of each
+   page hand-rolling its own hover classes. */
+.tile-hover {
+  transition: transform 0.15s ease-out, box-shadow 0.15s ease-out, border-color 0.15s ease-out;
+}
+.tile-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px -12px rgba(0, 0, 0, 0.5);
+}
+.tile-hover:active {
+  transform: translateY(0) scale(0.98);
+}
+
+/* ---- shimmer loading skeleton (heatmap tiles, list rows while fetching) ---- */
+@keyframes shimmer {
+  from {
+    background-position: -200px 0;
+  }
+  to {
+    background-position: 200px 0;
+  }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 50%, var(--surface) 75%);
+  background-size: 400px 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile-hover,
+  .fade-in,
+  .animate-marquee,
+  .live-dot,
+  .skeleton {
+    animation: none !important;
+    transition: none !important;
+  }
+}

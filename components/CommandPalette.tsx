@@ -7,7 +7,9 @@ const ACTIONS = [
   { label: 'Go to Dashboard', href: '/dashboard', hint: 'Overview' },
   { label: 'Discover live market news', href: '/discover', hint: 'Browse & categorize' },
   { label: 'Analyze a new event', href: '/analyze', hint: 'Event → recommendation' },
+  { label: 'Global markets & crypto heatmap', href: '/markets', hint: 'Indices & crypto' },
   { label: 'Open my watchlist', href: '/watchlist', hint: 'Tracked stocks' },
+  { label: 'View simulated portfolio', href: '/portfolio', hint: 'Paper positions & P&L' },
   { label: 'View analysis history', href: '/history', hint: 'Past decisions' },
   { label: 'Open settings', href: '/settings', hint: 'Profile & preferences' },
 ]

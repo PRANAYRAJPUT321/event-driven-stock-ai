@@ -7,6 +7,12 @@ import AppShell from '@/components/layout/AppShell'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import type { User } from '@supabase/supabase-js'
 
+interface AlertEvent {
+  id: string
+  event_title: string
+  created_at: string
+}
+
 interface WatchlistRow {
   id: string
   stock_id: string
@@ -23,6 +29,7 @@ interface WatchlistRow {
     recommendation: string
     created_at: string
   } | null
+  alerts: AlertEvent[]
 }
 
 export default function Watchlist() {
@@ -68,7 +75,24 @@ export default function Watchlist() {
           .limit(1)
           .maybeSingle()
 
-        return { ...row, latestScore: scoreData || null }
+        // Watchlist alerts: events analyzed since this stock was added whose
+        // affected sectors overlap the stock's own sector — surfaces new
+        // event-driven activity relevant to something already being tracked,
+        // without needing a separate "alerts" table or read/unread state.
+        let alerts: AlertEvent[] = []
+        if (row.stocks?.sector) {
+          const { data: alertData } = await supabase
+            .from('event_analysis')
+            .select('id, event_title, created_at')
+            .eq('user_id', user.id)
+            .overlaps('affected_sectors', [row.stocks.sector])
+            .gt('created_at', row.created_at)
+            .order('created_at', { ascending: false })
+            .limit(3)
+          alerts = alertData || []
+        }
+
+        return { ...row, latestScore: scoreData || null, alerts }
       })
     )
 
@@ -98,7 +122,11 @@ export default function Watchlist() {
 
       <div className="panel p-7">
         {loading ? (
-          <div className="text-center py-16 text-ink-faint">Loading…</div>
+          <div className="space-y-2">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="skeleton h-20" />
+            ))}
+          </div>
         ) : rows.length === 0 ? (
           <div className="text-center py-16">
             <p className="text-ink text-lg">Your watchlist is empty</p>
@@ -115,7 +143,7 @@ export default function Watchlist() {
             {rows.map((row) => (
               <div
                 key={row.id}
-                className="flex items-center justify-between border border-border rounded-lg p-4 hover:bg-surface-hover transition"
+                className="tile-hover flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-border rounded-lg p-4 hover:bg-surface-hover"
               >
                 <div className="flex-1">
                   <div className="flex items-center gap-3">
@@ -132,6 +160,19 @@ export default function Watchlist() {
                     </p>
                   ) : (
                     <p className="text-xs text-ink-faint mt-1.5">No event analysis yet for this stock</p>
+                  )}
+                  {row.alerts.length > 0 && (
+                    <div className="mt-2.5 flex flex-wrap gap-1.5">
+                      {row.alerts.map((a) => (
+                        <button
+                          key={a.id}
+                          onClick={() => router.push(`/events/${a.id}`)}
+                          className="text-[10px] bg-accent-dim/40 border border-accent-dim text-accent-bright px-2 py-1 rounded-full hover:bg-accent-dim transition"
+                        >
+                          🔔 {a.event_title.length > 40 ? a.event_title.slice(0, 40) + '…' : a.event_title}
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
                 <button

@@ -123,7 +123,11 @@ export default function Discover() {
       </div>
 
       {loading ? (
-        <div className="text-center py-16 text-ink-faint">Loading…</div>
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="skeleton h-24" />
+          ))}
+        </div>
       ) : filtered.length === 0 ? (
         <div className="panel p-10 text-center text-ink-muted">
           <p className="text-lg mb-2 text-ink">No news cached yet</p>
@@ -141,7 +145,7 @@ export default function Discover() {
       ) : (
         <div className="space-y-3">
           {filtered.map((item) => (
-            <div key={item.id} className="panel p-5 hover:border-border-bright transition">
+            <div key={item.id} className="tile-hover panel p-5 hover:border-border-bright">
               <div className="flex justify-between items-start gap-4">
                 <div className="flex-1 min-w-0">
                   <a

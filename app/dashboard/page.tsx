@@ -8,6 +8,7 @@ import type { User } from '@supabase/supabase-js'
 import AppShell from '@/components/layout/AppShell'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import ScoreChip from '@/components/ui/ScoreChip'
+import { getSimulatedPrice } from '@/lib/market/mockData'
 
 interface RecentAnalysis {
   id: string
@@ -15,6 +16,15 @@ interface RecentAnalysis {
   recommendation: string | null
   opportunity_score: number | null
   created_at: string
+}
+
+interface SectorTilt {
+  sector: string
+  count: number
+  buy: number
+  hold: number
+  avoid: number
+  tilt: number // (buy - avoid) / count, -1..1
 }
 
 const NAV_CARDS = [
@@ -49,6 +59,12 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [recent, setRecent] = useState<RecentAnalysis[]>([])
   const [stats, setStats] = useState({ total: 0, buy: 0, hold: 0, avoid: 0, avgScore: 0 })
+  const [sectorTilts, setSectorTilts] = useState<SectorTilt[]>([])
+  const [trackRecord, setTrackRecord] = useState<{
+    total: number
+    positive: number
+    byRec: Record<string, { count: number; positive: number }>
+  } | null>(null)
   const router = useRouter()
   const supabase = createClient()
 
@@ -63,7 +79,7 @@ export default function Dashboard() {
 
       const { data } = await supabase
         .from('event_analysis')
-        .select('id, event_title, recommendation, opportunity_score, created_at')
+        .select('id, event_title, recommendation, opportunity_score, affected_sectors, created_at')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
         .limit(100)
@@ -78,6 +94,53 @@ export default function Dashboard() {
         ? all.reduce((sum, r) => sum + (r.opportunity_score || 0), 0) / all.length
         : 0
       setStats({ total: all.length, buy, hold, avoid, avgScore })
+
+      // Sector heatmap: credit every sector an analysis touched with that
+      // analysis's overall recommendation, tallying how often each sector
+      // has come up bullish vs. bearish across everything this user has
+      // analyzed — reuses data already fetched above, no extra query.
+      const bySector = new Map<string, { count: number; buy: number; hold: number; avoid: number }>()
+      for (const r of all) {
+        for (const sector of r.affected_sectors || []) {
+          const entry = bySector.get(sector) || { count: 0, buy: 0, hold: 0, avoid: 0 }
+          entry.count++
+          if (r.recommendation === 'BUY') entry.buy++
+          else if (r.recommendation === 'HOLD') entry.hold++
+          else if (r.recommendation === 'AVOID') entry.avoid++
+          bySector.set(sector, entry)
+        }
+      }
+      const tilts: SectorTilt[] = Array.from(bySector.entries())
+        .map(([sector, v]) => ({ sector, ...v, tilt: v.count ? (v.buy - v.avoid) / v.count : 0 }))
+        .sort((a, b) => b.count - a.count)
+      setSectorTilts(tilts)
+
+      // Track record / calibration: how simulated paper positions (from the
+      // "Simulate" action on event detail pages) actually moved against
+      // this project's own deterministic price model, grouped by the
+      // recommendation that prompted each one — the explainability
+      // differentiator this project's README calls out, made concrete.
+      const { data: positions } = await supabase
+        .from('portfolio_positions')
+        .select('symbol, recommendation, entry_price, entry_date')
+        .eq('user_id', session.user.id)
+
+      if (positions && positions.length > 0) {
+        const byRec: Record<string, { count: number; positive: number }> = {}
+        let positive = 0
+        for (const p of positions) {
+          const current = getSimulatedPrice(p.symbol, p.entry_price, p.entry_date)
+          const isPositive = current >= p.entry_price
+          if (isPositive) positive++
+          const rec = p.recommendation || 'UNKNOWN'
+          const entry = byRec[rec] || { count: 0, positive: 0 }
+          entry.count++
+          if (isPositive) entry.positive++
+          byRec[rec] = entry
+        }
+        setTrackRecord({ total: positions.length, positive, byRec })
+      }
+
       setLoading(false)
     }
     getUser()
@@ -128,7 +191,7 @@ export default function Dashboard() {
       <div className="grid md:grid-cols-2 gap-5 mb-8">
         {NAV_CARDS.map((card) => (
           <Link key={card.href} href={card.href}>
-            <div className="panel p-7 hover:border-border-bright hover:bg-surface-hover transition cursor-pointer group h-full">
+            <div className="tile-hover panel p-7 hover:border-border-bright hover:bg-surface-hover cursor-pointer group h-full">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-[10px] font-mono uppercase tracking-widest text-accent-bright border border-accent-dim rounded-full px-2 py-0.5">
                   {card.tag}
@@ -168,7 +231,7 @@ export default function Dashboard() {
               <button
                 key={r.id}
                 onClick={() => router.push(`/events/${r.id}`)}
-                className="w-full text-left flex items-center justify-between p-3 rounded-lg hover:bg-surface-hover transition"
+                className="tile-hover w-full text-left flex items-center justify-between p-3 rounded-lg hover:bg-surface-hover"
               >
                 <span className="text-ink text-sm truncate mr-3">{r.event_title}</span>
                 <div className="flex items-center gap-2 flex-shrink-0">
@@ -180,6 +243,83 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Track Record */}
+      {trackRecord && trackRecord.total > 0 && (
+        <div className="panel p-7 mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold text-ink">Track Record</h2>
+            <Link href="/portfolio" className="text-accent-bright hover:underline text-xs font-medium">
+              View portfolio →
+            </Link>
+          </div>
+          <p className="text-ink-muted text-xs mb-5">
+            Of {trackRecord.total} simulated position{trackRecord.total === 1 ? '' : 's'},{' '}
+            <span className="text-buy font-semibold">
+              {Math.round((trackRecord.positive / trackRecord.total) * 100)}%
+            </span>{' '}
+            moved positive against this project&apos;s simulated price model.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {(['BUY', 'HOLD', 'AVOID'] as const).map((rec) => {
+              const entry = trackRecord.byRec[rec]
+              return (
+                <div key={rec} className="tile-hover border border-border rounded-lg p-4">
+                  <RecommendationBadge rec={rec} size="sm" />
+                  <p className="font-mono text-xl font-bold text-ink mono-tabular mt-2">
+                    {entry ? `${Math.round((entry.positive / entry.count) * 100)}%` : '—'}
+                  </p>
+                  <p className="text-[10px] text-ink-faint font-mono">
+                    {entry ? `${entry.positive}/${entry.count} positive` : 'no simulated positions'}
+                  </p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Sector Heatmap */}
+      {sectorTilts.length > 0 && (
+        <div className="panel p-7 mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold text-ink">Sector Heatmap</h2>
+            <Link href="/markets" className="text-accent-bright hover:underline text-xs font-medium">
+              World markets →
+            </Link>
+          </div>
+          <p className="text-ink-muted text-xs mb-5">
+            How every sector your analyses have touched has tilted, by recommendation.
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {sectorTilts.map((s, idx) => {
+              const alpha = Math.min(Math.abs(s.tilt), 1) * 0.5 + 0.08
+              const [r, g, b] = s.tilt >= 0 ? [52, 211, 153] : [248, 113, 113]
+              return (
+                <div
+                  key={s.sector}
+                  style={{
+                    background: `rgba(${r}, ${g}, ${b}, ${alpha})`,
+                    borderColor: `rgba(${r}, ${g}, ${b}, ${Math.min(alpha + 0.25, 0.9)})`,
+                    animationDelay: `${Math.min(idx * 30, 300)}ms`,
+                  }}
+                  className="tile-hover fade-in rounded-xl border p-4"
+                >
+                  <p className="font-bold text-ink text-sm mb-1 truncate" title={s.sector}>
+                    {s.sector}
+                  </p>
+                  <p className="text-[10px] text-ink-faint font-mono">
+                    {s.count} analysis{s.count === 1 ? '' : 'es'}
+                  </p>
+                  <p className={`mono-tabular text-xs font-semibold mt-1 ${s.tilt >= 0 ? 'text-buy' : 'text-avoid'}`}>
+                    {s.buy} BUY · {s.hold} HOLD · {s.avoid} AVOID
+                  </p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* How it works */}
       <div className="panel p-7">

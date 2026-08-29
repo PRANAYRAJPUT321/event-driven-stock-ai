@@ -127,6 +127,29 @@ export function getMockRisk(symbol: string): MockRisk {
   }
 }
 
+/**
+ * Deterministic forward price walk for the paper-portfolio feature. Seeded
+ * purely by symbol — deliberately NOT biased by the recommendation that
+ * prompted the simulated position, so the resulting "track record" reflects
+ * an honest (if synthetic) outcome rather than a tautological one where BUY
+ * calls are coded to always look right. Same seed + same elapsed-days count
+ * always reproduces the same price, so it's stable across renders and only
+ * moves forward with real elapsed time. Capped at 60 simulated days so a
+ * long-held paper position doesn't compound into an unrealistic number.
+ */
+export function getSimulatedPrice(symbol: string, entryPrice: number, entryDate: string): number {
+  const daysElapsed = Math.min(
+    Math.max(Math.floor((Date.now() - new Date(entryDate).getTime()) / 86400000), 0),
+    60
+  )
+  const rand = seededRandom(symbol + '-walk')
+  let price = entryPrice
+  for (let i = 0; i < daysElapsed; i++) {
+    price *= 1 + range(rand, -0.025, 0.025)
+  }
+  return Number(price.toFixed(2))
+}
+
 export function riskScoreToLevel(score: number): 'LOW' | 'MODERATE' | 'HIGH' | 'VERY HIGH' {
   if (score >= 70) return 'LOW'
   if (score >= 50) return 'MODERATE'
