@@ -40,6 +40,23 @@ interface ClassificationJson {
   transmission_explanation?: string
 }
 
+interface MarketSnapshot {
+  id: string
+  asset_type: 'index' | 'crypto'
+  symbol: string
+  name: string
+  region: string | null
+  price: number | null
+  change_pct: number | null
+  fetched_at: string
+}
+
+// Event types/economic variables where showing live global-market context
+// alongside the AI's own transmission-mechanism explanation actually
+// grounds the narrative in something real, rather than every event getting
+// a market strip whether it's relevant or not.
+const GLOBAL_CONTEXT_TRIGGERS = new Set(['GLOBAL_MARKET_SHOCK', 'CURRENCY', 'OIL_PRICE'])
+
 interface Analysis {
   id: string
   event_title: string
@@ -72,6 +89,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   const [watchingId, setWatchingId] = useState<string | null>(null)
   const [positionedIds, setPositionedIds] = useState<Set<string>>(new Set())
   const [positioningId, setPositioningId] = useState<string | null>(null)
+  const [marketContext, setMarketContext] = useState<MarketSnapshot[]>([])
   const [userId, setUserId] = useState<string | null>(null)
   const [user, setUser] = useState<User | null>(null)
   const router = useRouter()
@@ -132,6 +150,32 @@ export default function EventDetails({ params }: { params: { id: string } }) {
 
     fetchAnalysis()
   }, [params.id])
+
+  useEffect(() => {
+    const classification = analysis?.analysis_json
+    if (!classification) return
+    const triggered =
+      GLOBAL_CONTEXT_TRIGGERS.has(classification.event_type) ||
+      GLOBAL_CONTEXT_TRIGGERS.has(classification.economic_variable)
+    if (!triggered) return
+
+    async function loadMarketContext() {
+      const { data } = await supabase
+        .from('market_snapshots')
+        .select('id, asset_type, symbol, name, region, price, change_pct, fetched_at')
+        .eq('asset_type', 'index')
+
+      // market_snapshots has one row per (asset_type, symbol) — upserted in
+      // place on refresh, so no dedup needed. Just surface the most notable
+      // moves first.
+      const sorted = [...(data || [])].sort(
+        (a, b) => Math.abs(b.change_pct ?? 0) - Math.abs(a.change_pct ?? 0)
+      )
+      setMarketContext(sorted.slice(0, 4))
+    }
+
+    loadMarketContext()
+  }, [analysis])
 
   async function handleSaveAnalysis() {
     if (!userId || !analysis || saved) return
@@ -262,6 +306,39 @@ export default function EventDetails({ params }: { params: { id: string } }) {
             stockSymbol={topStock?.stock_symbol}
             explanation={classification.transmission_explanation}
           />
+        </div>
+      )}
+
+      {/* Global Market Context */}
+      {marketContext.length > 0 && (
+        <div className="panel p-7 mb-6 fade-in">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-sm font-bold text-ink flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-accent" />
+              Global Market Context
+            </h2>
+            <button onClick={() => router.push('/markets')} className="text-[10px] text-accent-bright hover:underline">
+              Full heatmap →
+            </button>
+          </div>
+          <p className="text-xs text-ink-faint mb-4">
+            This event&apos;s classification ({classification?.economic_variable || classification?.event_type}) is
+            the kind that transmits through world markets — here&apos;s how major indices stood as of the last refresh.
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {marketContext.map((s) => (
+              <div key={s.id} className="border border-border rounded-lg p-3">
+                <p className="font-mono text-[10px] text-ink-faint uppercase truncate">{s.region || s.symbol}</p>
+                <p className="font-semibold text-ink text-xs truncate" title={s.name}>
+                  {s.name}
+                </p>
+                <p className={`mono-tabular text-sm font-bold ${(s.change_pct ?? 0) >= 0 ? 'text-buy' : 'text-avoid'}`}>
+                  {(s.change_pct ?? 0) >= 0 ? '+' : ''}
+                  {s.change_pct?.toFixed(2)}%
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
