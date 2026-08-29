@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import AppShell from '@/components/layout/AppShell'
+import type { User } from '@supabase/supabase-js'
 
 interface NewsItem {
   id: string
@@ -21,6 +23,7 @@ const SECTOR_FILTERS = ['All', 'Banking', 'IT', 'Energy', 'Auto', 'NBFC', 'Realt
 export default function Discover() {
   const router = useRouter()
   const supabase = createClient()
+  const [user, setUser] = useState<User | null>(null)
   const [news, setNews] = useState<NewsItem[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -38,6 +41,7 @@ export default function Discover() {
       router.push('/auth/login')
       return
     }
+    setUser(user)
 
     const { data } = await supabase
       .from('news_feeds')
@@ -72,120 +76,117 @@ export default function Discover() {
     router.push(`/analyze?news_id=${item.id}`)
   }
 
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    router.push('/auth/login')
+  }
+
   const filtered = filter === 'All' ? news : news.filter((n) => n.detected_sectors?.includes(filter))
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
-      <header className="bg-white shadow sticky top-0 z-50">
-        <div className="max-w-5xl mx-auto px-4 py-4 flex justify-between items-center">
-          <button onClick={() => router.push('/dashboard')} className="text-blue-600 hover:text-blue-700 text-sm font-medium">
-            ← Dashboard
+    <AppShell userEmail={user?.email} onLogout={handleLogout}>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 fade-in">
+        <div>
+          <p className="text-xs font-mono uppercase tracking-widest text-accent-bright mb-2">Live feed</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-ink mb-1">Market News &amp; Events</h1>
+          <p className="text-ink-muted text-sm">Auto-categorized by AI. Pick one and trace its market impact.</p>
+        </div>
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="flex-shrink-0 bg-accent hover:bg-accent-bright disabled:opacity-50 text-[#0a0d14] font-semibold px-4 py-2.5 rounded-lg text-sm transition"
+        >
+          {refreshing ? 'Fetching…' : '↻ Refresh News'}
+        </button>
+      </div>
+
+      {refreshMsg && (
+        <p className="text-sm text-accent-bright bg-accent-dim/40 border border-accent-dim rounded-lg px-3 py-2 mb-6">
+          {refreshMsg}
+        </p>
+      )}
+
+      <div className="flex gap-2 mb-6 overflow-x-auto pb-1">
+        {SECTOR_FILTERS.map((s) => (
+          <button
+            key={s}
+            onClick={() => setFilter(s)}
+            className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium border transition ${
+              filter === s
+                ? 'bg-accent text-[#0a0d14] border-accent'
+                : 'bg-surface text-ink-muted border-border hover:border-border-bright'
+            }`}
+          >
+            {s}
           </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="text-center py-16 text-ink-faint">Loading…</div>
+      ) : filtered.length === 0 ? (
+        <div className="panel p-10 text-center text-ink-muted">
+          <p className="text-lg mb-2 text-ink">No news cached yet</p>
+          <p className="text-sm mb-6">
+            Tap <strong className="text-ink">Refresh News</strong> above to fetch and categorize the latest financial headlines.
+          </p>
           <button
             onClick={handleRefresh}
             disabled={refreshing}
-            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium"
+            className="bg-accent hover:bg-accent-bright disabled:opacity-50 text-[#0a0d14] font-semibold px-6 py-2 rounded-lg transition"
           >
-            {refreshing ? 'Fetching...' : '↻ Refresh News'}
+            {refreshing ? 'Fetching…' : 'Refresh News'}
           </button>
         </div>
-      </header>
-
-      <main className="max-w-5xl mx-auto px-4 py-8">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Market News &amp; Events</h1>
-          <p className="text-gray-600">
-            Live financial news, auto-categorized by sector. Pick one and analyze its market impact.
-          </p>
-          {refreshMsg && (
-            <p className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mt-3">
-              {refreshMsg}
-            </p>
-          )}
-        </div>
-
-        <div className="flex gap-2 mb-6 overflow-x-auto pb-1">
-          {SECTOR_FILTERS.map((s) => (
-            <button
-              key={s}
-              onClick={() => setFilter(s)}
-              className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-medium border ${
-                filter === s
-                  ? 'bg-blue-600 text-white border-blue-600'
-                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-              }`}
-            >
-              {s}
-            </button>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((item) => (
+            <div key={item.id} className="panel p-5 hover:border-border-bright transition">
+              <div className="flex justify-between items-start gap-4">
+                <div className="flex-1 min-w-0">
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-base font-semibold text-ink hover:text-accent-bright hover:underline"
+                  >
+                    {item.title}
+                  </a>
+                  {item.description && (
+                    <p className="text-ink-muted text-sm mt-1.5 line-clamp-2">{item.description}</p>
+                  )}
+                  <div className="mt-3 flex flex-wrap gap-1.5 items-center">
+                    {item.event_type && (
+                      <span className="bg-surface-2 text-accent-bright px-2 py-0.5 text-[10px] rounded-full font-mono uppercase tracking-wide border border-border">
+                        {item.event_type.replace(/_/g, ' ')}
+                      </span>
+                    )}
+                    {item.detected_sectors?.map((sector) => (
+                      <span key={sector} className="bg-surface text-ink-muted px-2 py-0.5 text-[10px] rounded-full border border-border">
+                        {sector}
+                      </span>
+                    ))}
+                    {item.relevance_score != null && (
+                      <span className="text-[10px] text-ink-faint font-mono ml-1">
+                        relevance {item.relevance_score.toFixed(0)}/100
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-ink-faint mt-2 font-mono">
+                    {item.source} &middot; {item.published_at ? new Date(item.published_at).toLocaleDateString() : ''}
+                  </p>
+                </div>
+                <button
+                  onClick={() => analyzeNews(item)}
+                  className="flex-shrink-0 bg-surface-2 hover:bg-accent hover:text-[#0a0d14] border border-border-bright text-ink text-sm font-medium px-4 py-2 rounded-lg transition"
+                >
+                  Analyze
+                </button>
+              </div>
+            </div>
           ))}
         </div>
-
-        {loading ? (
-          <div className="text-center py-16 text-gray-500">Loading...</div>
-        ) : filtered.length === 0 ? (
-          <div className="bg-white rounded-lg shadow-lg p-10 text-center text-gray-500">
-            <p className="text-lg mb-2">📰 No news cached yet</p>
-            <p className="text-sm mb-6">
-              Tap <strong>Refresh News</strong> above to fetch and categorize the latest financial headlines.
-            </p>
-            <button
-              onClick={handleRefresh}
-              disabled={refreshing}
-              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-2 rounded-lg"
-            >
-              {refreshing ? 'Fetching...' : 'Refresh News'}
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {filtered.map((item) => (
-              <div key={item.id} className="bg-white rounded-lg shadow p-5 hover:shadow-md transition">
-                <div className="flex justify-between items-start gap-4">
-                  <div className="flex-1 min-w-0">
-                    <a
-                      href={item.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-lg font-semibold text-gray-900 hover:text-blue-600 hover:underline"
-                    >
-                      {item.title}
-                    </a>
-                    {item.description && (
-                      <p className="text-gray-600 text-sm mt-1.5 line-clamp-2">{item.description}</p>
-                    )}
-                    <div className="mt-3 flex flex-wrap gap-1.5 items-center">
-                      {item.event_type && (
-                        <span className="bg-purple-100 text-purple-700 px-2 py-0.5 text-xs rounded-full font-medium">
-                          {item.event_type.replace(/_/g, ' ')}
-                        </span>
-                      )}
-                      {item.detected_sectors?.map((sector) => (
-                        <span key={sector} className="bg-blue-100 text-blue-700 px-2 py-0.5 text-xs rounded-full">
-                          {sector}
-                        </span>
-                      ))}
-                      {item.relevance_score != null && (
-                        <span className="text-xs text-gray-400 ml-1">
-                          relevance {item.relevance_score.toFixed(0)}/100
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-400 mt-2">
-                      {item.source} &middot; {item.published_at ? new Date(item.published_at).toLocaleDateString() : ''}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => analyzeNews(item)}
-                    className="flex-shrink-0 bg-gray-900 hover:bg-black text-white text-sm font-medium px-4 py-2 rounded-lg"
-                  >
-                    Analyze
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </main>
-    </div>
+      )}
+    </AppShell>
   )
 }

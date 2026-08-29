@@ -21,16 +21,11 @@ function LoginForm() {
     setLoading(true)
 
     try {
-      const { error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      })
-
+      const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
       if (authError) {
         setError(authError.message)
         return
       }
-
       router.push('/dashboard')
     } catch (err: any) {
       setError(err.message || 'An error occurred')
@@ -40,51 +35,49 @@ function LoginForm() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 px-4">
-      <div className="w-full max-w-md">
-        <div className="bg-white rounded-lg shadow-lg p-8">
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-gray-900">📊 MarketAI</h1>
-            <p className="text-gray-600 mt-2">Event-Driven Stock Intelligence</p>
+    <div className="min-h-screen grid-backdrop flex items-center justify-center px-4 font-sans text-ink">
+      <div className="w-full max-w-md fade-in">
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center gap-2 mb-3">
+            <span className="live-dot" />
+            <span className="font-mono text-2xl font-bold tracking-tight">PULSE</span>
           </div>
+          <p className="text-ink-muted text-sm">Event-driven stock intelligence for Indian equities</p>
+        </div>
 
+        <div className="panel-elevated shadow-panel p-8">
           {message && (
-            <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded mb-4">
+            <div className="bg-accent-dim/40 border border-accent-dim text-accent-bright px-4 py-3 rounded-lg mb-5 text-sm">
               {message}
             </div>
           )}
-
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+            <div className="bg-avoid-dim border border-avoid-dim text-avoid px-4 py-3 rounded-lg mb-5 text-sm">
               {error}
             </div>
           )}
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Email
-              </label>
+              <label className="block text-xs font-medium text-ink-muted mb-1.5 uppercase tracking-wide">Email</label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-4 py-2.5 bg-surface border border-border rounded-lg text-sm text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent-dim focus:border-accent transition"
                 placeholder="you@example.com"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Password
-              </label>
+              <label className="block text-xs font-medium text-ink-muted mb-1.5 uppercase tracking-wide">Password</label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-4 py-2.5 bg-surface border border-border rounded-lg text-sm text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent-dim focus:border-accent transition"
                 placeholder="••••••••"
               />
             </div>
@@ -92,15 +85,15 @@ function LoginForm() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition disabled:opacity-50"
+              className="w-full bg-accent hover:bg-accent-bright disabled:opacity-50 text-[#0a0d14] font-semibold py-2.5 px-4 rounded-lg transition"
             >
-              {loading ? 'Signing in...' : 'Sign In'}
+              {loading ? 'Signing in…' : 'Sign In'}
             </button>
           </form>
 
-          <div className="mt-6 text-center text-sm">
-            Don't have an account?{' '}
-            <Link href="/auth/signup" className="text-blue-600 hover:underline font-medium">
+          <div className="mt-6 text-center text-sm text-ink-muted">
+            Don&apos;t have an account?{' '}
+            <Link href="/auth/signup" className="text-accent-bright hover:underline font-medium">
               Sign up
             </Link>
           </div>
@@ -112,7 +105,7 @@ function LoginForm() {
 
 export default function Login() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+    <Suspense fallback={<div className="min-h-screen grid-backdrop flex items-center justify-center text-ink-muted">Loading…</div>}>
       <LoginForm />
     </Suspense>
   )

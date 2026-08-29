@@ -5,6 +5,9 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import type { User } from '@supabase/supabase-js'
+import AppShell from '@/components/layout/AppShell'
+import RecommendationBadge from '@/components/ui/RecommendationBadge'
+import ScoreChip from '@/components/ui/ScoreChip'
 
 interface RecentAnalysis {
   id: string
@@ -14,10 +17,38 @@ interface RecentAnalysis {
   created_at: string
 }
 
+const NAV_CARDS = [
+  {
+    href: '/analyze',
+    title: 'Analyze New Event',
+    desc: 'Enter a financial event and get a deterministic, event-driven recommendation.',
+    tag: 'Core',
+  },
+  {
+    href: '/discover',
+    title: 'Discover Market News',
+    desc: 'Live, AI-categorized financial headlines — pick one and trace its impact.',
+    tag: 'Live feed',
+  },
+  {
+    href: '/watchlist',
+    title: 'My Watchlist',
+    desc: 'Stocks you are tracking, with their most recent event-driven score.',
+    tag: 'Tracking',
+  },
+  {
+    href: '/history',
+    title: 'Analysis History',
+    desc: 'Every event you have analyzed, filterable by recommendation.',
+    tag: 'Archive',
+  },
+]
+
 export default function Dashboard() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [recent, setRecent] = useState<RecentAnalysis[]>([])
+  const [stats, setStats] = useState({ total: 0, buy: 0, hold: 0, avoid: 0, avgScore: 0 })
   const router = useRouter()
   const supabase = createClient()
 
@@ -35,9 +66,18 @@ export default function Dashboard() {
         .select('id, event_title, recommendation, opportunity_score, created_at')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false })
-        .limit(5)
+        .limit(100)
 
-      setRecent(data || [])
+      const all = data || []
+      setRecent(all.slice(0, 5))
+
+      const buy = all.filter((r) => r.recommendation === 'BUY').length
+      const hold = all.filter((r) => r.recommendation === 'HOLD').length
+      const avoid = all.filter((r) => r.recommendation === 'AVOID').length
+      const avgScore = all.length
+        ? all.reduce((sum, r) => sum + (r.opportunity_score || 0), 0) / all.length
+        : 0
+      setStats({ total: all.length, buy, hold, avoid, avgScore })
       setLoading(false)
     }
     getUser()
@@ -49,142 +89,116 @@ export default function Dashboard() {
   }
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center">Loading...</div>
+    return (
+      <div className="min-h-screen grid-backdrop flex items-center justify-center text-ink-muted font-sans">
+        Loading…
+      </div>
+    )
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
-      {/* Header */}
-      <header className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">📊 MarketAI</h1>
-            <p className="text-gray-600 text-sm">Event-Driven Stock Intelligence</p>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="text-gray-700">Welcome, {user?.email}</span>
-            <button
-              onClick={handleLogout}
-              className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg"
-            >
-              Logout
-            </button>
-          </div>
+    <AppShell userEmail={user?.email} onLogout={handleLogout}>
+      <div className="mb-8 fade-in">
+        <p className="text-xs font-mono uppercase tracking-widest text-accent-bright mb-2">Welcome back</p>
+        <h1 className="text-2xl sm:text-3xl font-bold text-ink">{user?.email?.split('@')[0]}</h1>
+        <p className="text-ink-muted text-sm mt-1">Here&apos;s where your event-driven intelligence stands.</p>
+      </div>
+
+      {/* Stat strip */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8 fade-in">
+        <div className="panel p-5">
+          <p className="text-xs text-ink-faint uppercase tracking-wide mb-1">Events analyzed</p>
+          <p className="font-mono text-2xl font-bold text-ink mono-tabular">{stats.total}</p>
         </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="grid md:grid-cols-2 gap-6 mb-8">
-          {/* Analyze Event Card */}
-          <Link href="/analyze">
-            <div className="bg-white rounded-lg shadow-lg p-8 hover:shadow-xl transition cursor-pointer">
-              <div className="text-4xl mb-4">⚡</div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">Analyze New Event</h2>
-              <p className="text-gray-600">Enter a financial event and get AI-powered stock recommendations</p>
-            </div>
-          </Link>
-
-          {/* Discover Card */}
-          <Link href="/discover">
-            <div className="bg-white rounded-lg shadow-lg p-8 hover:shadow-xl transition cursor-pointer">
-              <div className="text-4xl mb-4">📰</div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">Discover Market News</h2>
-              <p className="text-gray-600">Browse live, auto-categorized financial news and analyze any event</p>
-            </div>
-          </Link>
-
-          {/* Watchlist Card */}
-          <Link href="/watchlist">
-            <div className="bg-white rounded-lg shadow-lg p-8 hover:shadow-xl transition cursor-pointer">
-              <div className="text-4xl mb-4">⭐</div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">My Watchlist</h2>
-              <p className="text-gray-600">Track your favorite stocks and recent event-driven analyses</p>
-            </div>
-          </Link>
-
-          {/* History Card */}
-          <Link href="/history">
-            <div className="bg-white rounded-lg shadow-lg p-8 hover:shadow-xl transition cursor-pointer">
-              <div className="text-4xl mb-4">📋</div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">Analysis History</h2>
-              <p className="text-gray-600">View all your past event analyses and recommendations</p>
-            </div>
-          </Link>
-
-          {/* Settings Card */}
-          <Link href="/settings">
-            <div className="bg-white rounded-lg shadow-lg p-8 hover:shadow-xl transition cursor-pointer">
-              <div className="text-4xl mb-4">⚙️</div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">Settings</h2>
-              <p className="text-gray-600">Manage your profile and preferences</p>
-            </div>
-          </Link>
+        <div className="panel p-5">
+          <p className="text-xs text-ink-faint uppercase tracking-wide mb-1">Avg. opportunity score</p>
+          <p className="font-mono text-2xl font-bold text-accent-bright mono-tabular">{stats.avgScore.toFixed(0)}</p>
         </div>
+        <div className="panel p-5">
+          <p className="text-xs text-ink-faint uppercase tracking-wide mb-1">BUY calls</p>
+          <p className="font-mono text-2xl font-bold text-buy mono-tabular">{stats.buy}</p>
+        </div>
+        <div className="panel p-5">
+          <p className="text-xs text-ink-faint uppercase tracking-wide mb-1">AVOID calls</p>
+          <p className="font-mono text-2xl font-bold text-avoid mono-tabular">{stats.avoid}</p>
+        </div>
+      </div>
 
-        {/* Recent Analyses */}
-        <div className="bg-white rounded-lg shadow-lg p-8 mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-2xl font-bold text-gray-900">Recent Analyses</h2>
-            {recent.length > 0 && (
-              <Link href="/history" className="text-blue-600 hover:underline text-sm font-medium">
-                View all →
-              </Link>
-            )}
-          </div>
-          {recent.length === 0 ? (
-            <p className="text-gray-500 text-sm py-4">
-              No analyses yet — <Link href="/analyze" className="text-blue-600 hover:underline">analyze your first event</Link> to see it here.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {recent.map((r) => (
-                <button
-                  key={r.id}
-                  onClick={() => router.push(`/events/${r.id}`)}
-                  className="w-full text-left flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition"
-                >
-                  <span className="text-gray-800 text-sm">{r.event_title}</span>
-                  <div className="flex items-center gap-2 flex-shrink-0 ml-3">
-                    <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full text-xs font-bold">
-                      {(r.opportunity_score || 0).toFixed(0)}
-                    </span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                      r.recommendation === 'BUY' ? 'bg-green-100 text-green-800' :
-                      r.recommendation === 'HOLD' ? 'bg-yellow-100 text-yellow-800' :
-                      r.recommendation === 'AVOID' ? 'bg-red-100 text-red-800' :
-                      'bg-gray-100 text-gray-600'
-                    }`}>
-                      {r.recommendation || 'PENDING'}
-                    </span>
-                  </div>
-                </button>
-              ))}
+      {/* Nav cards */}
+      <div className="grid md:grid-cols-2 gap-5 mb-8">
+        {NAV_CARDS.map((card) => (
+          <Link key={card.href} href={card.href}>
+            <div className="panel p-7 hover:border-border-bright hover:bg-surface-hover transition cursor-pointer group h-full">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[10px] font-mono uppercase tracking-widest text-accent-bright border border-accent-dim rounded-full px-2 py-0.5">
+                  {card.tag}
+                </span>
+                <span className="text-ink-faint group-hover:text-accent-bright group-hover:translate-x-0.5 transition text-sm">
+                  →
+                </span>
+              </div>
+              <h2 className="text-lg font-bold text-ink mb-1.5">{card.title}</h2>
+              <p className="text-ink-muted text-sm leading-relaxed">{card.desc}</p>
             </div>
+          </Link>
+        ))}
+      </div>
+
+      {/* Recent Analyses */}
+      <div className="panel p-7 mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-ink">Recent Analyses</h2>
+          {recent.length > 0 && (
+            <Link href="/history" className="text-accent-bright hover:underline text-xs font-medium">
+              View all →
+            </Link>
           )}
         </div>
-
-        {/* Info Section */}
-        <div className="bg-white rounded-lg shadow-lg p-8">
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">How It Works</h2>
-          <div className="grid md:grid-cols-4 gap-4">
-            {[
-              { num: '1', title: 'Enter Event', desc: 'Paste financial news or select from suggestions' },
-              { num: '2', title: 'AI Analysis', desc: 'System classifies and analyzes the event' },
-              { num: '3', title: 'Stock Impact', desc: 'Identifies affected stocks and sectors' },
-              { num: '4', title: 'Recommendation', desc: 'Get BUY/HOLD/AVOID views with reasoning' },
-            ].map((item) => (
-              <div key={item.num} className="text-center">
-                <div className="bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center font-bold mx-auto mb-2">
-                  {item.num}
+        {recent.length === 0 ? (
+          <p className="text-ink-muted text-sm py-4">
+            No analyses yet —{' '}
+            <Link href="/analyze" className="text-accent-bright hover:underline">
+              analyze your first event
+            </Link>{' '}
+            to see it here.
+          </p>
+        ) : (
+          <div className="space-y-1">
+            {recent.map((r) => (
+              <button
+                key={r.id}
+                onClick={() => router.push(`/events/${r.id}`)}
+                className="w-full text-left flex items-center justify-between p-3 rounded-lg hover:bg-surface-hover transition"
+              >
+                <span className="text-ink text-sm truncate mr-3">{r.event_title}</span>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <ScoreChip score={r.opportunity_score} size="sm" />
+                  <RecommendationBadge rec={r.recommendation} size="sm" />
                 </div>
-                <p className="font-semibold text-gray-900">{item.title}</p>
-                <p className="text-sm text-gray-600">{item.desc}</p>
-              </div>
+              </button>
             ))}
           </div>
+        )}
+      </div>
+
+      {/* How it works */}
+      <div className="panel p-7">
+        <h2 className="text-lg font-bold text-ink mb-5">How It Works</h2>
+        <div className="grid md:grid-cols-4 gap-6">
+          {[
+            { num: '01', title: 'Enter Event', desc: 'Paste live news or describe an event in your own words' },
+            { num: '02', title: 'AI Classification', desc: 'The event is mapped to a type, variable, and direction' },
+            { num: '03', title: 'Deterministic Scoring', desc: 'Fundamentals, valuation, technicals & risk are scored' },
+            { num: '04', title: 'Recommendation', desc: 'A BUY / HOLD / AVOID view, with a counter-argument' },
+          ].map((item) => (
+            <div key={item.num}>
+              <p className="font-mono text-accent-dim text-xs mb-2">{item.num}</p>
+              <p className="font-semibold text-ink text-sm mb-1">{item.title}</p>
+              <p className="text-xs text-ink-muted leading-relaxed">{item.desc}</p>
+            </div>
+          ))}
         </div>
-      </main>
-    </div>
+      </div>
+    </AppShell>
   )
 }
