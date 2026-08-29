@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import AppShell from '@/components/layout/AppShell'
+import type { User } from '@supabase/supabase-js'
 
 interface NewsSource {
   id: string
@@ -13,15 +15,35 @@ interface NewsSource {
   event_type: string | null
 }
 
+const EXAMPLES = [
+  'RBI raises repo rate by 25 basis points',
+  'Crude oil prices surge 10%',
+  'Major tech company announces Q3 earnings beat',
+  'Budget announcement increases tax on FDI',
+]
+
 function AnalyzeForm() {
   const [eventText, setEventText] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [newsSource, setNewsSource] = useState<NewsSource | null>(null)
+  const [user, setUser] = useState<User | null>(null)
   const router = useRouter()
   const searchParams = useSearchParams()
   const newsId = searchParams.get('news_id')
   const supabase = createClient()
+
+  useEffect(() => {
+    const init = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        router.push('/auth/login')
+        return
+      }
+      setUser(session.user)
+    }
+    init()
+  }, [])
 
   useEffect(() => {
     if (!newsId) return
@@ -54,8 +76,6 @@ function AnalyzeForm() {
 
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Analysis failed')
-
-      // Redirect to results page with analysis ID
       router.push(`/events/${data.analysisId}`)
     } catch (err: any) {
       setError(err.message || 'An error occurred')
@@ -64,39 +84,30 @@ function AnalyzeForm() {
     }
   }
 
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    router.push('/auth/login')
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
-      {/* Header */}
-      <header className="bg-white shadow sticky top-0 z-50">
-        <div className="max-w-4xl mx-auto px-4 py-4">
-          <button
-            onClick={() => router.push('/dashboard')}
-            className="text-blue-600 hover:text-blue-700 text-sm"
-          >
-            ← Back to Dashboard
-          </button>
-        </div>
-      </header>
+    <AppShell userEmail={user?.email} onLogout={handleLogout} showTicker={false}>
+      <div className="max-w-3xl mx-auto fade-in">
+        <p className="text-xs font-mono uppercase tracking-widest text-accent-bright mb-2">Step 01 · Event input</p>
+        <h1 className="text-2xl sm:text-3xl font-bold text-ink mb-2">Analyze a Financial Event</h1>
+        <p className="text-ink-muted mb-8 text-sm">
+          Every recommendation this platform produces is tied to a specific event — never a generic stock call.
+        </p>
 
-      {/* Main Content */}
-      <main className="max-w-4xl mx-auto px-4 py-12">
-        <div className="bg-white rounded-lg shadow-lg p-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Analyze Financial Event</h1>
-          <p className="text-gray-600 mb-8">
-            Enter a financial event and our AI will analyze its impact on Indian stocks
-          </p>
-
+        <div className="panel-elevated p-7 shadow-panel">
           {newsSource && (
-            <div className="bg-blue-50 border-l-4 border-blue-500 rounded-lg p-4 mb-6">
-              <p className="text-xs text-blue-600 font-medium uppercase tracking-wide mb-1">
-                Analyzing from news source
-              </p>
-              <p className="font-semibold text-gray-900 text-sm">{newsSource.title}</p>
+            <div className="bg-accent-dim/40 border-l-2 border-accent rounded-lg p-4 mb-6">
+              <p className="text-[10px] text-accent-bright font-mono uppercase tracking-wide mb-1">Analyzing from live news source</p>
+              <p className="font-semibold text-ink text-sm">{newsSource.title}</p>
               <a
                 href={newsSource.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-blue-600 hover:underline text-xs mt-1 inline-block"
+                className="text-accent-bright hover:underline text-xs mt-1.5 inline-block"
               >
                 {newsSource.source} — read full article →
               </a>
@@ -104,53 +115,43 @@ function AnalyzeForm() {
           )}
 
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6">
+            <div className="bg-avoid-dim border border-avoid-dim text-avoid px-4 py-3 rounded-lg mb-6 text-sm">
               {error}
             </div>
           )}
 
           <form onSubmit={handleAnalyze} className="space-y-6">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Financial Event
-              </label>
+              <label className="block text-xs font-medium text-ink-muted mb-2 uppercase tracking-wide">Financial Event</label>
               <textarea
                 value={eventText}
                 onChange={(e) => setEventText(e.target.value)}
                 placeholder="Example: RBI increases repo rate by 25 basis points to control inflation"
-                className="w-full h-32 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                className="w-full h-32 px-4 py-3 bg-surface border border-border rounded-lg text-sm text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent-dim focus:border-accent resize-none transition"
               />
-              <p className="text-gray-500 text-sm mt-2">
-                Paste news, press release, or describe the event in your own words
-              </p>
+              <p className="text-ink-faint text-xs mt-2">Paste news, a press release, or describe the event in your own words</p>
             </div>
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium py-3 px-6 rounded-lg transition"
+              className="w-full bg-accent hover:bg-accent-bright disabled:opacity-50 text-[#0a0d14] font-semibold py-3 px-6 rounded-lg transition"
             >
-              {loading ? 'Analyzing... Please wait' : 'Analyze Event'}
+              {loading ? 'Classifying event, scoring stocks…' : 'Analyze Event'}
             </button>
           </form>
 
-          {/* Quick Examples */}
           {!newsSource && (
-            <div className="mt-12 pt-8 border-t">
-              <h3 className="font-semibold text-gray-900 mb-4">Recent Events</h3>
-              <div className="grid md:grid-cols-2 gap-4">
-                {[
-                  'RBI raises repo rate by 25 basis points',
-                  'Crude oil prices surge 10%',
-                  'Major tech company announces Q3 earnings beat',
-                  'Budget announcement increases tax on FDI',
-                ].map((event, idx) => (
+            <div className="mt-10 pt-8 border-t border-border">
+              <h3 className="font-semibold text-ink text-sm mb-4">Recent Events</h3>
+              <div className="grid md:grid-cols-2 gap-3">
+                {EXAMPLES.map((event, idx) => (
                   <button
                     key={idx}
                     onClick={() => setEventText(event)}
-                    className="text-left p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition"
+                    className="text-left p-3 bg-surface border border-border rounded-lg hover:border-border-bright hover:bg-surface-hover transition"
                   >
-                    <p className="text-sm text-gray-700">{event}</p>
+                    <p className="text-sm text-ink-muted">{event}</p>
                   </button>
                 ))}
               </div>
@@ -158,22 +159,19 @@ function AnalyzeForm() {
           )}
 
           <div className="mt-6 text-center">
-            <button
-              onClick={() => router.push('/discover')}
-              className="text-blue-600 hover:underline text-sm font-medium"
-            >
+            <button onClick={() => router.push('/discover')} className="text-accent-bright hover:underline text-sm font-medium">
               Or browse live market news →
             </button>
           </div>
         </div>
-      </main>
-    </div>
+      </div>
+    </AppShell>
   )
 }
 
 export default function Analyze() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+    <Suspense fallback={<div className="min-h-screen grid-backdrop flex items-center justify-center text-ink-muted">Loading…</div>}>
       <AnalyzeForm />
     </Suspense>
   )

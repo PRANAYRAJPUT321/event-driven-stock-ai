@@ -3,6 +3,13 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import AppShell from '@/components/layout/AppShell'
+import ScoreGauge from '@/components/charts/ScoreGauge'
+import TransmissionFlow from '@/components/charts/TransmissionFlow'
+import ReturnSparkline from '@/components/charts/ReturnSparkline'
+import RecommendationBadge from '@/components/ui/RecommendationBadge'
+import ScoreChip from '@/components/ui/ScoreChip'
+import type { User } from '@supabase/supabase-js'
 
 interface StockScore {
   stock_id: string
@@ -24,6 +31,13 @@ interface HistoricalSummary {
   sampleEvents: string[]
 }
 
+interface ClassificationJson {
+  event_type: string
+  economic_variable: string
+  direction: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL'
+  transmission_explanation?: string
+}
+
 interface Analysis {
   id: string
   event_title: string
@@ -35,7 +49,15 @@ interface Analysis {
   contradictory_evidence: string
   risks: string[]
   historical_summary: HistoricalSummary | null
+  analysis_json: ClassificationJson | null
   created_at: string
+}
+
+const RISK_STYLE: Record<string, string> = {
+  LOW: 'text-buy bg-buy-dim border-buy-dim',
+  MODERATE: 'text-hold bg-hold-dim border-hold-dim',
+  HIGH: 'text-avoid bg-avoid-dim border-avoid-dim',
+  VERY_HIGH: 'text-avoid bg-avoid-dim border-avoid-dim',
 }
 
 export default function EventDetails({ params }: { params: { id: string } }) {
@@ -47,6 +69,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   const [watchedIds, setWatchedIds] = useState<Set<string>>(new Set())
   const [watchingId, setWatchingId] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
+  const [user, setUser] = useState<User | null>(null)
   const router = useRouter()
   const supabase = createClient()
 
@@ -59,6 +82,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
           return
         }
         setUserId(user.id)
+        setUser(user)
 
         const { data: analysisData } = await supabase
           .from('event_analysis')
@@ -82,10 +106,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
               .eq('event_analysis_id', params.id)
               .eq('user_id', user.id)
               .maybeSingle(),
-            supabase
-              .from('watchlists')
-              .select('stock_id')
-              .eq('user_id', user.id),
+            supabase.from('watchlists').select('stock_id').eq('user_id', user.id),
           ])
 
           setStocks(stockData || [])
@@ -118,22 +139,22 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   async function handleWatch(stockId: string) {
     if (!userId || watchedIds.has(stockId)) return
     setWatchingId(stockId)
-    const { error } = await supabase.from('watchlists').insert({
-      user_id: userId,
-      stock_id: stockId,
-    })
-    if (!error) {
-      setWatchedIds((prev) => new Set(prev).add(stockId))
-    }
+    const { error } = await supabase.from('watchlists').insert({ user_id: userId, stock_id: stockId })
+    if (!error) setWatchedIds((prev) => new Set(prev).add(stockId))
     setWatchingId(null)
+  }
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    router.push('/auth/login')
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen grid-backdrop flex items-center justify-center font-sans">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Analyzing event...</p>
+          <div className="live-dot mx-auto mb-4" />
+          <p className="text-ink-muted text-sm">Loading analysis…</p>
         </div>
       </div>
     )
@@ -141,13 +162,10 @@ export default function EventDetails({ params }: { params: { id: string } }) {
 
   if (!analysis) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen grid-backdrop flex items-center justify-center font-sans">
         <div className="text-center">
-          <p className="text-red-600 mb-4">Analysis not found</p>
-          <button
-            onClick={() => router.push('/dashboard')}
-            className="text-blue-600 hover:underline"
-          >
+          <p className="text-avoid mb-4">Analysis not found</p>
+          <button onClick={() => router.push('/dashboard')} className="text-accent-bright hover:underline">
             Back to Dashboard
           </button>
         </div>
@@ -155,266 +173,233 @@ export default function EventDetails({ params }: { params: { id: string } }) {
     )
   }
 
+  const classification = analysis.analysis_json
+  const topStock = stocks[0]
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
-      {/* Header */}
-      <header className="bg-white shadow sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
-          <button
-            onClick={() => router.push('/dashboard')}
-            className="text-blue-600 hover:text-blue-700 text-sm font-medium"
-          >
-            ← Dashboard
-          </button>
-          <button
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-              saved
-                ? 'bg-green-100 text-green-700 cursor-default'
-                : 'bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50'
-            }`}
-            onClick={handleSaveAnalysis}
-            disabled={saved || saving}
-          >
-            {saved ? '✓ Saved' : saving ? 'Saving...' : 'Save Analysis'}
-          </button>
-        </div>
-      </header>
+    <AppShell userEmail={user?.email} onLogout={handleLogout} showTicker={false}>
+      <div className="flex justify-end mb-4">
+        <button
+          onClick={handleSaveAnalysis}
+          disabled={saved || saving}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+            saved
+              ? 'bg-buy-dim text-buy border border-buy-dim cursor-default'
+              : 'bg-accent hover:bg-accent-bright text-[#0a0d14] disabled:opacity-50'
+          }`}
+        >
+          {saved ? '✓ Saved' : saving ? 'Saving…' : 'Save Analysis'}
+        </button>
+      </div>
 
-      {/* Main Content */}
-      <main className="max-w-6xl mx-auto px-4 py-8">
-        {/* Event Summary */}
-        <div className="bg-white rounded-lg shadow-lg p-8 mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">{analysis.event_title}</h1>
-          
-          <div className="grid md:grid-cols-4 gap-4 mb-6">
-            <div className="bg-blue-50 p-4 rounded-lg">
-              <p className="text-gray-600 text-sm">Score</p>
-              <p className="text-3xl font-bold text-blue-600">{(analysis.opportunity_score || 0).toFixed(0)}/100</p>
-            </div>
-            <div className={`p-4 rounded-lg ${
-              analysis.recommendation === 'BUY' ? 'bg-green-50' :
-              analysis.recommendation === 'HOLD' ? 'bg-yellow-50' : 'bg-red-50'
-            }`}>
-              <p className="text-gray-600 text-sm">View</p>
-              <p className={`text-3xl font-bold ${
-                analysis.recommendation === 'BUY' ? 'text-green-600' :
-                analysis.recommendation === 'HOLD' ? 'text-yellow-600' : 'text-red-600'
-              }`}>{analysis.recommendation || 'N/A'}</p>
-            </div>
-            <div className="bg-purple-50 p-4 rounded-lg">
-              <p className="text-gray-600 text-sm">Sectors</p>
-              <p className="text-2xl font-bold text-purple-600">{analysis.affected_sectors?.length || 0}</p>
-            </div>
-            <div className="bg-orange-50 p-4 rounded-lg">
-              <p className="text-gray-600 text-sm">Date</p>
-              <p className="text-sm font-semibold text-orange-600">
-                {new Date(analysis.created_at).toLocaleDateString()}
-              </p>
-            </div>
-          </div>
-
-          {/* Sectors */}
-          {analysis.affected_sectors && analysis.affected_sectors.length > 0 && (
-            <div className="mb-6">
-              <h3 className="font-semibold text-gray-900 mb-3">Affected Sectors</h3>
-              <div className="flex flex-wrap gap-2">
-                {analysis.affected_sectors.map((sector: string, idx: number) => (
-                  <span key={idx} className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm">
-                    {sector}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Historical Event Evidence */}
-        {analysis.historical_summary && analysis.historical_summary.matchCount > 0 && (
-          <div className="bg-white rounded-lg shadow-lg p-8 mb-8">
-            <h2 className="text-xl font-bold text-gray-900 mb-4">📊 Historical Event Evidence</h2>
-            <p className="text-gray-600 text-sm mb-4">
-              Based on {analysis.historical_summary.matchCount} similar historical event(s), average measured market reaction:
+      {/* Event Summary */}
+      <div className="panel-elevated p-8 mb-6 fade-in">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-8">
+          <div className="flex-1">
+            <p className="text-xs font-mono uppercase tracking-widest text-accent-bright mb-2">
+              {new Date(analysis.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
             </p>
-            <div className="grid md:grid-cols-2 gap-6">
-              <div>
-                <p className="text-sm font-semibold text-gray-700 mb-2">NIFTY 50 Average Return</p>
-                <div className="grid grid-cols-4 gap-2">
-                  {[
-                    { label: '1D', val: analysis.historical_summary.avgNiftyReturn.d1 },
-                    { label: '3D', val: analysis.historical_summary.avgNiftyReturn.d3 },
-                    { label: '5D', val: analysis.historical_summary.avgNiftyReturn.d5 },
-                    { label: '20D', val: analysis.historical_summary.avgNiftyReturn.d20 },
-                  ].map((item) => (
-                    <div key={item.label} className="bg-gray-50 rounded-lg p-3 text-center">
-                      <p className="text-xs text-gray-500">{item.label}</p>
-                      <p className={`font-bold ${item.val >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {item.val >= 0 ? '+' : ''}{item.val}%
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-gray-700 mb-2">Sector Average Return</p>
-                <div className="grid grid-cols-4 gap-2">
-                  {[
-                    { label: '1D', val: analysis.historical_summary.avgSectorReturn.d1 },
-                    { label: '3D', val: analysis.historical_summary.avgSectorReturn.d3 },
-                    { label: '5D', val: analysis.historical_summary.avgSectorReturn.d5 },
-                    { label: '20D', val: analysis.historical_summary.avgSectorReturn.d20 },
-                  ].map((item) => (
-                    <div key={item.label} className="bg-gray-50 rounded-lg p-3 text-center">
-                      <p className="text-xs text-gray-500">{item.label}</p>
-                      <p className={`font-bold ${item.val >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {item.val >= 0 ? '+' : ''}{item.val}%
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-            {analysis.historical_summary.sampleEvents?.length > 0 && (
-              <p className="text-xs text-gray-500 mt-4">
-                Reference events: {analysis.historical_summary.sampleEvents.join(', ')}
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Bull/Bear Case */}
-        <div className="grid md:grid-cols-2 gap-8 mb-8">
-          <div className="bg-green-50 border-l-4 border-green-500 rounded-lg p-6">
-            <h3 className="font-bold text-green-900 mb-3">📈 Bull Case</h3>
-            <p className="text-green-800 text-sm leading-relaxed">
-              {analysis.bull_case || 'Positive factors support this investment thesis...'}
-            </p>
-          </div>
-
-          <div className="bg-red-50 border-l-4 border-red-500 rounded-lg p-6">
-            <h3 className="font-bold text-red-900 mb-3">📉 Bear Case</h3>
-            <p className="text-red-800 text-sm leading-relaxed">
-              {analysis.bear_case || 'Downside risks and contrarian arguments...'}
-            </p>
-          </div>
-        </div>
-
-        {/* Contradictory Evidence */}
-        {analysis.contradictory_evidence && (
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 mb-8">
-            <h3 className="font-bold text-gray-900 mb-3">🔍 Contradictory Evidence</h3>
-            <p className="text-gray-700 text-sm leading-relaxed">{analysis.contradictory_evidence}</p>
-          </div>
-        )}
-
-        {/* Key Risks */}
-        {analysis.risks && analysis.risks.length > 0 && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-8">
-            <h3 className="font-bold text-yellow-900 mb-3">⚠️ Key Risks</h3>
-            <ul className="space-y-2">
-              {analysis.risks.map((risk: string, idx: number) => (
-                <li key={idx} className="text-yellow-800 text-sm flex items-start">
-                  <span className="mr-2">•</span>
-                  <span>{risk}</span>
-                </li>
+            <h1 className="text-2xl sm:text-3xl font-bold text-ink mb-4 leading-snug">{analysis.event_title}</h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <RecommendationBadge rec={analysis.recommendation} />
+              {analysis.affected_sectors?.map((sector) => (
+                <span key={sector} className="bg-surface text-ink-muted border border-border px-2.5 py-1 rounded-full text-xs">
+                  {sector}
+                </span>
               ))}
-            </ul>
+            </div>
           </div>
-        )}
+          <ScoreGauge score={analysis.opportunity_score || 0} />
+        </div>
+      </div>
 
-        {/* Top Affected Stocks */}
-        <div className="bg-white rounded-lg shadow-lg p-8">
-          <h2 className="text-2xl font-bold text-gray-900 mb-6">Top Affected Stocks</h2>
-          
-          {stocks.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b-2 border-gray-200">
-                    <th className="text-left py-3 px-4 text-gray-700 font-semibold">Stock</th>
-                    <th className="text-center py-3 px-4 text-gray-700 font-semibold">Score</th>
-                    <th className="text-center py-3 px-4 text-gray-700 font-semibold">View</th>
-                    <th className="text-center py-3 px-4 text-gray-700 font-semibold">Confidence</th>
-                    <th className="text-center py-3 px-4 text-gray-700 font-semibold">Fundamentals</th>
-                    <th className="text-center py-3 px-4 text-gray-700 font-semibold">Valuation</th>
-                    <th className="text-center py-3 px-4 text-gray-700 font-semibold">Technical</th>
-                    <th className="text-center py-3 px-4 text-gray-700 font-semibold">Risk</th>
-                    <th className="text-center py-3 px-4 text-gray-700 font-semibold">Watch</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stocks.map((stock, idx) => (
-                    <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="py-4 px-4 font-semibold text-gray-900">{stock.stock_symbol}</td>
-                      <td className="py-4 px-4 text-center">
-                        <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-bold">
-                          {(stock.opportunity_score || 0).toFixed(0)}
-                        </span>
-                      </td>
-                      <td className="py-4 px-4 text-center">
-                        <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                          stock.recommendation === 'BUY' ? 'bg-green-100 text-green-800' :
-                          stock.recommendation === 'HOLD' ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-red-100 text-red-800'
-                        }`}>
-                          {stock.recommendation || 'N/A'}
-                        </span>
-                      </td>
-                      <td className="py-4 px-4 text-center text-gray-700 font-medium">{(stock.confidence || 0).toFixed(0)}%</td>
-                      <td className="py-4 px-4 text-center text-gray-700">{(stock.fundamental_score || 0).toFixed(0)}/100</td>
-                      <td className="py-4 px-4 text-center text-gray-700">{(stock.valuation_score || 0).toFixed(0)}/100</td>
-                      <td className="py-4 px-4 text-center text-gray-700">{(stock.technical_score || 0).toFixed(0)}/100</td>
-                      <td className="py-4 px-4 text-center">
-                        <span className={`px-2 py-1 rounded text-xs font-semibold ${
-                          stock.risk_level === 'LOW' ? 'bg-green-100 text-green-700' :
-                          stock.risk_level === 'MODERATE' ? 'bg-yellow-100 text-yellow-700' :
-                          stock.risk_level === 'HIGH' ? 'bg-orange-100 text-orange-700' :
-                          'bg-red-100 text-red-700'
-                        }`}>
-                          {stock.risk_level || 'N/A'}
-                        </span>
-                      </td>
-                      <td className="py-4 px-4 text-center">
-                        <button
-                          onClick={() => handleWatch(stock.stock_id)}
-                          disabled={watchedIds.has(stock.stock_id) || watchingId === stock.stock_id}
-                          className={`text-xs font-medium px-2.5 py-1 rounded-full ${
-                            watchedIds.has(stock.stock_id)
-                              ? 'bg-green-100 text-green-700 cursor-default'
-                              : 'bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50'
-                          }`}
-                        >
-                          {watchedIds.has(stock.stock_id)
-                            ? '✓ Watching'
-                            : watchingId === stock.stock_id
-                              ? '...'
-                              : '+ Watch'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      {/* Transmission Mechanism */}
+      {classification && (
+        <div className="panel p-7 mb-6 fade-in">
+          <h2 className="text-sm font-bold text-ink mb-1 flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-accent" />
+            Transmission Mechanism
+          </h2>
+          <p className="text-xs text-ink-faint mb-2">How this event is expected to reach the stock price</p>
+          <TransmissionFlow
+            eventType={classification.event_type}
+            economicVariable={classification.economic_variable}
+            direction={classification.direction}
+            sectors={analysis.affected_sectors || []}
+            stockSymbol={topStock?.stock_symbol}
+            explanation={classification.transmission_explanation}
+          />
+        </div>
+      )}
+
+      {/* Historical Event Evidence */}
+      {analysis.historical_summary && analysis.historical_summary.matchCount > 0 && (
+        <div className="panel p-7 mb-6 fade-in">
+          <h2 className="text-sm font-bold text-ink mb-1">Historical Event Evidence</h2>
+          <p className="text-ink-faint text-xs mb-5">
+            Based on {analysis.historical_summary.matchCount} similar historical event(s) — average measured market reaction
+          </p>
+          <div className="grid md:grid-cols-2 gap-8">
+            <div>
+              <p className="text-xs font-semibold text-ink-muted mb-3">NIFTY 50 Average Return</p>
+              <ReturnSparkline
+                points={[
+                  analysis.historical_summary.avgNiftyReturn.d1,
+                  analysis.historical_summary.avgNiftyReturn.d3,
+                  analysis.historical_summary.avgNiftyReturn.d5,
+                  analysis.historical_summary.avgNiftyReturn.d20,
+                ]}
+                labels={['1D', '3D', '5D', '20D']}
+                color="var(--accent-bright)"
+              />
             </div>
-          ) : (
-            <div className="text-center py-8 text-gray-500">
-              <p>No stock scores available yet.</p>
-              <p className="text-sm">Analysis is being processed...</p>
+            <div>
+              <p className="text-xs font-semibold text-ink-muted mb-3">Sector Average Return</p>
+              <ReturnSparkline
+                points={[
+                  analysis.historical_summary.avgSectorReturn.d1,
+                  analysis.historical_summary.avgSectorReturn.d3,
+                  analysis.historical_summary.avgSectorReturn.d5,
+                  analysis.historical_summary.avgSectorReturn.d20,
+                ]}
+                labels={['1D', '3D', '5D', '20D']}
+                color={
+                  analysis.historical_summary.avgSectorReturn.d5 >= 0 ? 'var(--buy)' : 'var(--avoid)'
+                }
+              />
             </div>
+          </div>
+          {analysis.historical_summary.sampleEvents?.length > 0 && (
+            <p className="text-[11px] text-ink-faint mt-5 pt-4 border-t border-border">
+              Reference events: {analysis.historical_summary.sampleEvents.join(', ')}
+            </p>
           )}
         </div>
+      )}
 
-        {/* Disclaimer */}
-        <div className="mt-8 bg-gray-100 border border-gray-200 rounded-lg p-5">
-          <p className="text-xs text-gray-600 leading-relaxed">
-            <strong>Disclaimer:</strong> This is an event-driven analytical view generated from
-            deterministic scoring of fundamental, valuation, technical, and risk factors combined
-            with historical event evidence. It is not a guarantee of future performance and should
-            not be considered financial advice. Target prices are intentionally not shown — see the
-            historical event evidence above for a range-based reference instead of a fabricated
-            number. Please consult a qualified financial advisor before making investment decisions.
+      {/* Bull/Bear Case */}
+      <div className="grid md:grid-cols-2 gap-5 mb-6">
+        <div className="panel p-6 border-l-2" style={{ borderLeftColor: 'var(--buy)' }}>
+          <h3 className="font-bold text-buy mb-3 text-sm flex items-center gap-2">
+            <span>▲</span> Bull Case
+          </h3>
+          <p className="text-ink-muted text-sm leading-relaxed">
+            {analysis.bull_case || 'Positive factors support this investment thesis…'}
           </p>
         </div>
-      </main>
-    </div>
+        <div className="panel p-6 border-l-2" style={{ borderLeftColor: 'var(--avoid)' }}>
+          <h3 className="font-bold text-avoid mb-3 text-sm flex items-center gap-2">
+            <span>▼</span> Bear Case
+          </h3>
+          <p className="text-ink-muted text-sm leading-relaxed">
+            {analysis.bear_case || 'Downside risks and contrarian arguments…'}
+          </p>
+        </div>
+      </div>
+
+      {/* Contradictory Evidence */}
+      {analysis.contradictory_evidence && (
+        <div className="panel p-6 mb-6">
+          <h3 className="font-bold text-ink mb-2 text-sm">Contradictory Evidence</h3>
+          <p className="text-ink-muted text-sm leading-relaxed">{analysis.contradictory_evidence}</p>
+        </div>
+      )}
+
+      {/* Key Risks */}
+      {analysis.risks && analysis.risks.length > 0 && (
+        <div className="panel p-6 mb-6 border-l-2" style={{ borderLeftColor: 'var(--hold)' }}>
+          <h3 className="font-bold text-hold mb-3 text-sm">Key Risks</h3>
+          <ul className="space-y-2">
+            {analysis.risks.map((risk: string, idx: number) => (
+              <li key={idx} className="text-ink-muted text-sm flex items-start">
+                <span className="mr-2 text-hold">•</span>
+                <span>{risk}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Top Affected Stocks */}
+      <div className="panel p-7 mb-6">
+        <h2 className="text-lg font-bold text-ink mb-6">Top Affected Stocks</h2>
+
+        {stocks.length > 0 ? (
+          <div className="overflow-x-auto -mx-2">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="text-left py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Stock</th>
+                  <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Score</th>
+                  <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">View</th>
+                  <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Confidence</th>
+                  <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Fundamentals</th>
+                  <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Valuation</th>
+                  <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Technical</th>
+                  <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Risk</th>
+                  <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Watch</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stocks.map((stock, idx) => (
+                  <tr key={idx} className="border-b border-border hover:bg-surface-hover transition">
+                    <td className="py-4 px-2 font-mono font-semibold text-ink">{stock.stock_symbol}</td>
+                    <td className="py-4 px-2 text-center">
+                      <ScoreChip score={stock.opportunity_score} size="sm" />
+                    </td>
+                    <td className="py-4 px-2 text-center">
+                      <RecommendationBadge rec={stock.recommendation} size="sm" />
+                    </td>
+                    <td className="py-4 px-2 text-center text-ink-muted font-mono">{(stock.confidence || 0).toFixed(0)}%</td>
+                    <td className="py-4 px-2 text-center text-ink-muted font-mono">{(stock.fundamental_score || 0).toFixed(0)}</td>
+                    <td className="py-4 px-2 text-center text-ink-muted font-mono">{(stock.valuation_score || 0).toFixed(0)}</td>
+                    <td className="py-4 px-2 text-center text-ink-muted font-mono">{(stock.technical_score || 0).toFixed(0)}</td>
+                    <td className="py-4 px-2 text-center">
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
+                          RISK_STYLE[stock.risk_level] || 'text-ink-faint bg-surface-2 border-border'
+                        }`}
+                      >
+                        {stock.risk_level || 'N/A'}
+                      </span>
+                    </td>
+                    <td className="py-4 px-2 text-center">
+                      <button
+                        onClick={() => handleWatch(stock.stock_id)}
+                        disabled={watchedIds.has(stock.stock_id) || watchingId === stock.stock_id}
+                        className={`text-[10px] font-medium px-2.5 py-1 rounded-full border transition ${
+                          watchedIds.has(stock.stock_id)
+                            ? 'bg-buy-dim text-buy border-buy-dim cursor-default'
+                            : 'bg-surface text-accent-bright border-border hover:border-accent-dim disabled:opacity-50'
+                        }`}
+                      >
+                        {watchedIds.has(stock.stock_id) ? '✓ Watching' : watchingId === stock.stock_id ? '…' : '+ Watch'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-center py-8 text-ink-faint">
+            <p>No stock scores available yet.</p>
+            <p className="text-sm">Analysis is being processed…</p>
+          </div>
+        )}
+      </div>
+
+      {/* Disclaimer */}
+      <div className="panel p-5">
+        <p className="text-xs text-ink-faint leading-relaxed">
+          <strong className="text-ink-muted">Disclaimer:</strong> This is an event-driven analytical view generated from
+          deterministic scoring of fundamental, valuation, technical, and risk factors combined with historical event
+          evidence. It is not a guarantee of future performance and should not be considered financial advice. Target
+          prices are intentionally not shown — see the historical event evidence above for a range-based reference
+          instead of a fabricated number. Please consult a qualified financial advisor before making investment
+          decisions.
+        </p>
+      </div>
+    </AppShell>
   )
 }
