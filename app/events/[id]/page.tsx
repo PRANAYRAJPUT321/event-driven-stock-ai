@@ -454,7 +454,14 @@ export default function EventDetails({ params }: { params: { id: string } }) {
               <tbody>
                 {stocks.map((stock, idx) => (
                   <tr key={idx} className="border-b border-border hover:bg-surface-hover transition">
-                    <td className="py-4 px-2 font-mono font-semibold text-ink">{stock.stock_symbol}</td>
+                    <td className="py-4 px-2">
+                      <button
+                        onClick={() => router.push(`/stocks/${stock.stock_symbol}`)}
+                        className="font-mono font-semibold text-ink hover:text-accent-bright hover:underline"
+                      >
+                        {stock.stock_symbol}
+                      </button>
+                    </td>
                     <td className="py-4 px-2 text-center">
                       <ScoreChip score={stock.opportunity_score} size="sm" />
                     </td>

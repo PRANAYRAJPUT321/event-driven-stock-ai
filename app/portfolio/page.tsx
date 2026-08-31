@@ -137,7 +137,12 @@ export default function Portfolio() {
               >
                 <div className="flex-1">
                   <div className="flex items-center gap-3">
-                    <span className="font-mono font-bold text-ink">{p.symbol}</span>
+                    <button
+                      onClick={() => router.push(`/stocks/${p.symbol}`)}
+                      className="font-mono font-bold text-ink hover:text-accent-bright hover:underline"
+                    >
+                      {p.symbol}
+                    </button>
                     <RecommendationBadge rec={p.recommendation} size="sm" />
                     {p.event_analysis_id && (
                       <button
