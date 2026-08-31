@@ -147,7 +147,12 @@ export default function Watchlist() {
               >
                 <div className="flex-1">
                   <div className="flex items-center gap-3">
-                    <span className="font-mono font-bold text-ink">{row.stocks?.symbol}</span>
+                    <button
+                      onClick={() => row.stocks?.symbol && router.push(`/stocks/${row.stocks.symbol}`)}
+                      className="font-mono font-bold text-ink hover:text-accent-bright hover:underline"
+                    >
+                      {row.stocks?.symbol}
+                    </button>
                     <span className="text-ink-muted text-sm">{row.stocks?.name}</span>
                     <span className="bg-surface-2 text-accent-bright text-[10px] px-2 py-0.5 rounded-full border border-border">
                       {row.stocks?.sector}
