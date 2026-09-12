@@ -1,0 +1,469 @@
+[
+  {
+    "symbol": "ADANIPORTS",
+    "n_rows": 3540,
+    "start": "2012-01-17 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 single-day |return| > 20% (verify vs. split/bonus adjustment)",
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "ASIANPAINT",
+    "n_rows": 3941,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "AXISBANK",
+    "n_rows": 3941,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 single-day |return| > 20% (verify vs. split/bonus adjustment)",
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "BAJAJ-AUTO",
+    "n_rows": 3941,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "BAJAJFINSV",
+    "n_rows": 3941,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "2 single-day |return| > 20% (verify vs. split/bonus adjustment)",
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "BAJFINANCE",
+    "n_rows": 3863,
+    "start": "2010-09-29 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 single-day |return| > 20% (verify vs. split/bonus adjustment)",
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "BHARTIARTL",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "BPCL",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "BRITANNIA",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 single-day |return| > 20% (verify vs. split/bonus adjustment)",
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "CIPLA",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "COALINDIA",
+    "n_rows": 3836,
+    "start": "2010-11-04 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "DRREDDY",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "EICHERMOT",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 single-day |return| > 20% (verify vs. split/bonus adjustment)",
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "GAIL",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "2 single-day |return| > 20% (verify vs. split/bonus adjustment)",
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "GRASIM",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "HCLTECH",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "HDFC",
+    "n_rows": 3204,
+    "start": "2010-06-10 00:00:00",
+    "end": "2023-07-12 00:00:00",
+    "issues": [
+      "1 single-day |return| > 20% (verify vs. split/bonus adjustment)"
+    ]
+  },
+  {
+    "symbol": "HDFCBANK",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "HEROMOTOCO",
+    "n_rows": 3647,
+    "start": "2011-08-08 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "HINDALCO",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "HINDUNILVR",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "ICICIBANK",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "INDUSINDBK",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "5 single-day |return| > 20% (verify vs. split/bonus adjustment)",
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "INDUSTOWER",
+    "n_rows": 3305,
+    "start": "2012-12-28 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 single-day |return| > 20% (verify vs. split/bonus adjustment)",
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "INFY",
+    "n_rows": 3675,
+    "start": "2011-06-29 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 single-day |return| > 20% (verify vs. split/bonus adjustment)",
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "IOC",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "ITC",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "JSWSTEEL",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "KOTAKBANK",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "LT",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "M&M",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "MARUTI",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "NESTLEIND",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "NTPC",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "ONGC",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "POWERGRID",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "2 single-day |return| > 20% (verify vs. split/bonus adjustment)",
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "RELIANCE",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "SBIN",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 single-day |return| > 20% (verify vs. split/bonus adjustment)",
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "SHREECEM",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "SUNPHARMA",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "TATAMOTORS",
+    "n_rows": 3724,
+    "start": "2010-06-10 00:00:00",
+    "end": "2025-10-23 00:00:00",
+    "issues": [
+      "3 single-day |return| > 20% (verify vs. split/bonus adjustment)",
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "TATASTEEL",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "TCS",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "TECHM",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "TITAN",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "ULTRACEMCO",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "UPL",
+    "n_rows": 3104,
+    "start": "2013-10-23 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "1 single-day |return| > 20% (verify vs. split/bonus adjustment)",
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "VEDL",
+    "n_rows": 2731,
+    "start": "2015-05-07 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "2 single-day |return| > 20% (verify vs. split/bonus adjustment)",
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "WIPRO",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "2 single-day |return| > 20% (verify vs. split/bonus adjustment)",
+      "1 gaps of >10 calendar days between rows"
+    ]
+  },
+  {
+    "symbol": "ZEEL",
+    "n_rows": 3940,
+    "start": "2010-06-10 00:00:00",
+    "end": "2026-09-11 00:00:00",
+    "issues": [
+      "7 single-day |return| > 20% (verify vs. split/bonus adjustment)",
+      "1 gaps of >10 calendar days between rows"
+    ]
+  }
+]

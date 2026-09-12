@@ -1,0 +1,470 @@
+[
+  {
+    "symbol": "ASIANPAINT",
+    "split_date": "2013-07-30",
+    "ratio_pre_over_post": 10,
+    "raw_prev_close": 5118.2,
+    "raw_today_open": 521.5,
+    "turnover_prev": 213439275.0,
+    "turnover_today": 468702297.0
+  },
+  {
+    "symbol": "AXISBANK",
+    "split_date": "2014-07-28",
+    "ratio_pre_over_post": 5,
+    "raw_prev_close": 1985.75,
+    "raw_today_open": 403.45,
+    "turnover_prev": 1710336404.0,
+    "turnover_today": 2355450838.4
+  },
+  {
+    "symbol": "BAJAJ-AUTO",
+    "split_date": "2010-09-08",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 2997.4,
+    "raw_today_open": 1501.3,
+    "turnover_prev": 1319454240.0,
+    "turnover_today": 547081226.5
+  },
+  {
+    "symbol": "BAJAJFINSV",
+    "split_date": "2022-09-13",
+    "ratio_pre_over_post": 10,
+    "raw_prev_close": 17205.65,
+    "raw_today_open": 1755.0,
+    "turnover_prev": 6945061500.0,
+    "turnover_today": 18275136165.0
+  },
+  {
+    "symbol": "BAJFINANCE",
+    "split_date": "2016-09-08",
+    "ratio_pre_over_post": 10,
+    "raw_prev_close": 11393.3,
+    "raw_today_open": 1153.9,
+    "turnover_prev": 2845594530.0,
+    "turnover_today": 1851932188.7
+  },
+  {
+    "symbol": "BAJFINANCE",
+    "split_date": "2025-06-20",
+    "ratio_pre_over_post": 10,
+    "raw_prev_close": 8932.0,
+    "raw_today_open": 897.0,
+    "turnover_prev": 7928149027.5,
+    "turnover_today": 12845256177.0
+  },
+  {
+    "symbol": "BPCL",
+    "split_date": "2012-07-13",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 785.45,
+    "raw_today_open": 389.9,
+    "turnover_prev": 687581469.6,
+    "turnover_today": 261195179.7
+  },
+  {
+    "symbol": "BPCL",
+    "split_date": "2016-07-13",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 1120.55,
+    "raw_today_open": 559.9,
+    "turnover_prev": 4174005882.6000004,
+    "turnover_today": 2094527110.5
+  },
+  {
+    "symbol": "BPCL",
+    "split_date": "2017-07-13",
+    "ratio_pre_over_post": 1.5,
+    "raw_prev_close": 683.7,
+    "raw_today_open": 458.0,
+    "turnover_prev": 2144248344.0,
+    "turnover_today": 1775186474.0
+  },
+  {
+    "symbol": "BPCL",
+    "split_date": "2024-06-21",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 626.25,
+    "raw_today_open": 318.0,
+    "turnover_prev": 5603760260.0,
+    "turnover_today": 9541425912.0
+  },
+  {
+    "symbol": "BRITANNIA",
+    "split_date": "2018-11-29",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 5961.75,
+    "raw_today_open": 3016.0,
+    "turnover_prev": 755192980.0,
+    "turnover_today": 1249172912.0
+  },
+  {
+    "symbol": "DRREDDY",
+    "split_date": "2024-10-28",
+    "ratio_pre_over_post": 5,
+    "raw_prev_close": 6514.7,
+    "raw_today_open": 1320.0,
+    "turnover_prev": 1689580620.0,
+    "turnover_today": 1094773680.0
+  },
+  {
+    "symbol": "GAIL",
+    "split_date": "2019-07-09",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 302.1,
+    "raw_today_open": 151.0,
+    "turnover_prev": 2448522021.2999997,
+    "turnover_today": 1072704604.0
+  },
+  {
+    "symbol": "GAIL",
+    "split_date": "2022-09-06",
+    "ratio_pre_over_post": 1.5,
+    "raw_prev_close": 136.75,
+    "raw_today_open": 92.5,
+    "turnover_prev": 1743037472.0,
+    "turnover_today": 2617455572.5
+  },
+  {
+    "symbol": "GRASIM",
+    "split_date": "2016-10-06",
+    "ratio_pre_over_post": 5,
+    "raw_prev_close": 4933.55,
+    "raw_today_open": 994.0,
+    "turnover_prev": 573274669.0,
+    "turnover_today": 1270372754.0
+  },
+  {
+    "symbol": "HCLTECH",
+    "split_date": "2015-03-19",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 2006.55,
+    "raw_today_open": 990.0,
+    "turnover_prev": 9653198400.0,
+    "turnover_today": 5030803800.0
+  },
+  {
+    "symbol": "HCLTECH",
+    "split_date": "2019-12-05",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 1125.5,
+    "raw_today_open": 563.8,
+    "turnover_prev": 3326417136.0,
+    "turnover_today": 1513173799.1999998
+  },
+  {
+    "symbol": "HDFCBANK",
+    "split_date": "2011-07-14",
+    "ratio_pre_over_post": 5,
+    "raw_prev_close": 2519.7,
+    "raw_today_open": 505.1,
+    "turnover_prev": 926506590.0,
+    "turnover_today": 1181219788.6000001
+  },
+  {
+    "symbol": "HDFCBANK",
+    "split_date": "2019-09-19",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 2187.75,
+    "raw_today_open": 1099.9,
+    "turnover_prev": 7183987698.3,
+    "turnover_today": 5842289334.500001
+  },
+  {
+    "symbol": "HDFCBANK",
+    "split_date": "2025-08-26",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 1964.1,
+    "raw_today_open": 979.5,
+    "turnover_prev": 17169434924.4,
+    "turnover_today": 16570917514.5
+  },
+  {
+    "symbol": "ICICIBANK",
+    "split_date": "2014-12-04",
+    "ratio_pre_over_post": 5,
+    "raw_prev_close": 1794.1,
+    "raw_today_open": 362.5,
+    "turnover_prev": 3872857097.8999996,
+    "turnover_today": 4461258862.5
+  },
+  {
+    "symbol": "INFY",
+    "split_date": "2014-12-02",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 4349.85,
+    "raw_today_open": 2164.95,
+    "turnover_prev": 10058219671.0,
+    "turnover_today": 5766881232.599999
+  },
+  {
+    "symbol": "INFY",
+    "split_date": "2015-06-15",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 1975.05,
+    "raw_today_open": 976.95,
+    "turnover_prev": 4938778155.0,
+    "turnover_today": 2557863190.35
+  },
+  {
+    "symbol": "INFY",
+    "split_date": "2018-09-04",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 1434.25,
+    "raw_today_open": 722.0,
+    "turnover_prev": 7952349636.0,
+    "turnover_today": 11097229528.0
+  },
+  {
+    "symbol": "IOC",
+    "split_date": "2016-10-18",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 642.3,
+    "raw_today_open": 323.0,
+    "turnover_prev": 3523309048.7999997,
+    "turnover_today": 1204998981.0
+  },
+  {
+    "symbol": "IOC",
+    "split_date": "2018-03-15",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 395.05,
+    "raw_today_open": 191.0,
+    "turnover_prev": 6814133256.0,
+    "turnover_today": 5036657585.0
+  },
+  {
+    "symbol": "IOC",
+    "split_date": "2022-06-30",
+    "ratio_pre_over_post": 1.5,
+    "raw_prev_close": 109.8,
+    "raw_today_open": 73.95,
+    "turnover_prev": 1368642360.0,
+    "turnover_today": 2545725052.5
+  },
+  {
+    "symbol": "ITC",
+    "split_date": "2010-08-03",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 312.8,
+    "raw_today_open": 158.7,
+    "turnover_prev": 1716837221.0000002,
+    "turnover_today": 895926725.6999999
+  },
+  {
+    "symbol": "ITC",
+    "split_date": "2016-07-01",
+    "ratio_pre_over_post": 1.5,
+    "raw_prev_close": 368.4,
+    "raw_today_open": 243.3,
+    "turnover_prev": 5127945312.0,
+    "turnover_today": 6798831645.6
+  },
+  {
+    "symbol": "JSWSTEEL",
+    "split_date": "2017-01-04",
+    "ratio_pre_over_post": 10,
+    "raw_prev_close": 1644.55,
+    "raw_today_open": 166.75,
+    "turnover_prev": 743453409.0,
+    "turnover_today": 396688745.25
+  },
+  {
+    "symbol": "KOTAKBANK",
+    "split_date": "2010-09-13",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 864.6,
+    "raw_today_open": 437.55,
+    "turnover_prev": 969280349.5,
+    "turnover_today": 847447277.5500001
+  },
+  {
+    "symbol": "KOTAKBANK",
+    "split_date": "2015-07-08",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 1425.6,
+    "raw_today_open": 703.85,
+    "turnover_prev": 1701533724.4,
+    "turnover_today": 1648199914.2
+  },
+  {
+    "symbol": "KOTAKBANK",
+    "split_date": "2026-01-14",
+    "ratio_pre_over_post": 5,
+    "raw_prev_close": 2132.6,
+    "raw_today_open": 426.0,
+    "turnover_prev": 5409833957.0,
+    "turnover_today": 4608688242.0
+  },
+  {
+    "symbol": "LT",
+    "split_date": "2013-07-11",
+    "ratio_pre_over_post": 1.5,
+    "raw_prev_close": 1413.7,
+    "raw_today_open": 969.8,
+    "turnover_prev": 1510075134.0,
+    "turnover_today": 1696294636.3999999
+  },
+  {
+    "symbol": "LT",
+    "split_date": "2017-07-13",
+    "ratio_pre_over_post": 1.5,
+    "raw_prev_close": 1739.55,
+    "raw_today_open": 1165.1,
+    "turnover_prev": 2373672128.0,
+    "turnover_today": 1915137785.3999999
+  },
+  {
+    "symbol": "M&M",
+    "split_date": "2017-12-21",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 1541.75,
+    "raw_today_open": 767.0,
+    "turnover_prev": 7534821840.0,
+    "turnover_today": 5218465512.0
+  },
+  {
+    "symbol": "NESTLEIND",
+    "split_date": "2024-01-05",
+    "ratio_pre_over_post": 10,
+    "raw_prev_close": 27116.4,
+    "raw_today_open": 2754.0,
+    "turnover_prev": 3554810509.5,
+    "turnover_today": 7097234256.0
+  },
+  {
+    "symbol": "NESTLEIND",
+    "split_date": "2025-08-08",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 2234.6,
+    "raw_today_open": 1122.0,
+    "turnover_prev": 1133909140.0,
+    "turnover_today": 1394479944.0
+  },
+  {
+    "symbol": "ONGC",
+    "split_date": "2011-02-08",
+    "ratio_pre_over_post": 4,
+    "raw_prev_close": 1194.55,
+    "raw_today_open": 300.0,
+    "turnover_prev": 2506792800.0,
+    "turnover_today": 1374795600.0
+  },
+  {
+    "symbol": "ONGC",
+    "split_date": "2016-12-15",
+    "ratio_pre_over_post": 1.5,
+    "raw_prev_close": 305.3,
+    "raw_today_open": 202.8,
+    "turnover_prev": 2957493012.8999996,
+    "turnover_today": 2030258786.4
+  },
+  {
+    "symbol": "RELIANCE",
+    "split_date": "2017-09-07",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 1645.4,
+    "raw_today_open": 823.0,
+    "turnover_prev": 18122181516.8,
+    "turnover_today": 6097225128.0
+  },
+  {
+    "symbol": "RELIANCE",
+    "split_date": "2024-10-28",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 2655.7,
+    "raw_today_open": 1337.0,
+    "turnover_prev": 24985735876.0,
+    "turnover_today": 14472155950.0
+  },
+  {
+    "symbol": "SBIN",
+    "split_date": "2014-11-20",
+    "ratio_pre_over_post": 10,
+    "raw_prev_close": 2910.5,
+    "raw_today_open": 294.75,
+    "turnover_prev": 6115025757.0,
+    "turnover_today": 5334830277.75
+  },
+  {
+    "symbol": "SUNPHARMA",
+    "split_date": "2010-11-25",
+    "ratio_pre_over_post": 5,
+    "raw_prev_close": 2273.35,
+    "raw_today_open": 455.0,
+    "turnover_prev": 234909285.0,
+    "turnover_today": 442441545.0
+  },
+  {
+    "symbol": "SUNPHARMA",
+    "split_date": "2013-07-29",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 1117.3,
+    "raw_today_open": 565.0,
+    "turnover_prev": 1413761005.8000002,
+    "turnover_today": 472491985.0
+  },
+  {
+    "symbol": "TATASTEEL",
+    "split_date": "2022-07-28",
+    "ratio_pre_over_post": 10,
+    "raw_prev_close": 959.4,
+    "raw_today_open": 98.1,
+    "turnover_prev": 4998362802.0,
+    "turnover_today": 13455014096.699999
+  },
+  {
+    "symbol": "TCS",
+    "split_date": "2018-05-31",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 3514.1,
+    "raw_today_open": 1734.0,
+    "turnover_prev": 6630535954.650001,
+    "turnover_today": 8755609314.0
+  },
+  {
+    "symbol": "TECHM",
+    "split_date": "2015-03-19",
+    "ratio_pre_over_post": 4,
+    "raw_prev_close": 2800.5,
+    "raw_today_open": 695.0,
+    "turnover_prev": 10940990364.0,
+    "turnover_today": 3907205905.0
+  },
+  {
+    "symbol": "TITAN",
+    "split_date": "2011-06-23",
+    "ratio_pre_over_post": 20,
+    "raw_prev_close": 4292.45,
+    "raw_today_open": 210.0,
+    "turnover_prev": 4986938880.0,
+    "turnover_today": 2913360030.0
+  },
+  {
+    "symbol": "UPL",
+    "split_date": "2019-07-02",
+    "ratio_pre_over_post": 1.5,
+    "raw_prev_close": 948.2,
+    "raw_today_open": 637.4,
+    "turnover_prev": 2544341625.0,
+    "turnover_today": 4216729261.0
+  },
+  {
+    "symbol": "WIPRO",
+    "split_date": "2017-06-13",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 526.35,
+    "raw_today_open": 260.0,
+    "turnover_prev": 1244876334.0,
+    "turnover_today": 872239420.0
+  },
+  {
+    "symbol": "WIPRO",
+    "split_date": "2024-12-03",
+    "ratio_pre_over_post": 2,
+    "raw_prev_close": 584.55,
+    "raw_today_open": 295.35,
+    "turnover_prev": 3259972650.0000005,
+    "turnover_today": 4561765220.1
+  }
+]
