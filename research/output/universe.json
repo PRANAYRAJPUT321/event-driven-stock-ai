@@ -1,0 +1,69 @@
+{
+  "universe": [
+    "ADANIPORTS",
+    "ASIANPAINT",
+    "AXISBANK",
+    "BAJAJ-AUTO",
+    "BAJAJFINSV",
+    "BAJFINANCE",
+    "BHARTIARTL",
+    "BPCL",
+    "BRITANNIA",
+    "CIPLA",
+    "COALINDIA",
+    "DRREDDY",
+    "EICHERMOT",
+    "GAIL",
+    "GRASIM",
+    "HCLTECH",
+    "HDFCBANK",
+    "HEROMOTOCO",
+    "HINDALCO",
+    "HINDUNILVR",
+    "ICICIBANK",
+    "INDUSINDBK",
+    "INDUSTOWER",
+    "INFY",
+    "IOC",
+    "ITC",
+    "JSWSTEEL",
+    "KOTAKBANK",
+    "LT",
+    "M&M",
+    "MARUTI",
+    "NESTLEIND",
+    "NTPC",
+    "ONGC",
+    "POWERGRID",
+    "RELIANCE",
+    "SBIN",
+    "SHREECEM",
+    "SUNPHARMA",
+    "TATASTEEL",
+    "TCS",
+    "TECHM",
+    "TITAN",
+    "ULTRACEMCO",
+    "UPL",
+    "VEDL",
+    "WIPRO",
+    "ZEEL"
+  ],
+  "filter_stats": {
+    "n_input": 50,
+    "n_kept": 48,
+    "n_dropped": 2,
+    "dropped_detail": [
+      [
+        "HDFC",
+        "data ends 2023-07-12, well before window end 2026-09-11 (delisted/merged/renamed)"
+      ],
+      [
+        "TATAMOTORS",
+        "data ends 2025-10-23, well before window end 2026-09-11 (delisted/merged/renamed)"
+      ]
+    ],
+    "full_start": "2010-06-10 00:00:00",
+    "full_end": "2026-09-11 00:00:00"
+  }
+}
