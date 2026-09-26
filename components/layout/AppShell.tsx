@@ -7,7 +7,7 @@ import CommandPalette from '@/components/CommandPalette'
 import MarketBar from '@/components/MarketBar'
 import NewsTicker from '@/components/NewsTicker'
 import ThemeToggle from '@/components/ui/ThemeToggle'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, getSessionUser } from '@/lib/supabase/client'
 
 const NAV = [
   { href: '/dashboard', label: 'Dashboard' },
@@ -56,7 +56,10 @@ export default function AppShell({
     let active = true
 
     async function loadAlertCount() {
-      const { data: { user } } = await supabase.auth.getUser()
+      // getSessionUser never throws. The previous unguarded getUser() call
+      // rejected when Supabase was unreachable, and since nothing awaited
+      // this function that surfaced as an unhandled rejection on every page.
+      const { user } = await getSessionUser()
       if (!user) return
 
       const { data: watched } = await supabase
@@ -86,7 +89,8 @@ export default function AppShell({
       if (active) setWatchlistAlerts(count || 0)
     }
 
-    loadAlertCount()
+    // The badge is decoration; it must never break the shell around it.
+    loadAlertCount().catch(() => {})
     return () => {
       active = false
     }

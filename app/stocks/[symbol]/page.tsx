@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, getSessionUser } from '@/lib/supabase/client'
 import AppShell from '@/components/layout/AppShell'
 import type { User } from '@supabase/supabase-js'
 
@@ -98,22 +98,33 @@ export default function StockProfile({ params }: { params: { symbol: string } })
       setLoading(true)
       setError('')
 
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/auth/login')
-        return
-      }
+      // No auth guard: price, chart, statistics, fundamentals and the analyst
+      // view all come from Yahoo, so this page is useful signed out and while
+      // the database is unreachable. The session only decides whether the
+      // watchlist button can be offered.
+      const { user } = await getSessionUser()
       setUser(user)
 
       // Look up whether this symbol exists in the scored universe, so we
       // know whether "Add to Watchlist" is possible (watchlists FK requires
       // a real stock_id — this profile page also works for tickers outside
-      // that seeded set, since Yahoo Finance isn't limited to it).
-      const [{ data: stockRow }, { data: watchRow }] = await Promise.all([
-        supabase.from('stocks').select('id').eq('symbol', symbol).maybeSingle(),
-        Promise.resolve({ data: null as any }),
-      ])
-      if (stockRow) {
+      // that seeded set, since Yahoo Finance isn't limited to it). Wrapped
+      // because a paused database must not stop the Yahoo data below from
+      // loading.
+      let stockRow: { id: string } | null = null
+      if (user) {
+        try {
+          const { data } = await supabase
+            .from('stocks')
+            .select('id')
+            .eq('symbol', symbol)
+            .maybeSingle()
+          stockRow = data
+        } catch {
+          // Leave stockRow null — the watchlist button is simply not offered.
+        }
+      }
+      if (stockRow && user) {
         setStockId(stockRow.id)
         const { data: existingWatch } = await supabase
           .from('watchlists')

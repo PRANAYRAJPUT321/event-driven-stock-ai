@@ -2,7 +2,8 @@
 
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, getSessionUser } from '@/lib/supabase/client'
+import BackendDownNotice from '@/components/BackendDownNotice'
 import AppShell from '@/components/layout/AppShell'
 import type { User } from '@supabase/supabase-js'
 
@@ -29,18 +30,23 @@ function AnalyzeForm() {
   const [newsSource, setNewsSource] = useState<NewsSource | null>(null)
   const [user, setUser] = useState<User | null>(null)
   const router = useRouter()
+  const [backendDown, setBackendDown] = useState(false)
   const searchParams = useSearchParams()
   const newsId = searchParams.get('news_id')
   const supabase = createClient()
 
   useEffect(() => {
     const init = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) {
+      const { user: sessionUser, backendDown: down } = await getSessionUser()
+      if (down) {
+        setBackendDown(true)
+        return
+      }
+      if (!sessionUser) {
         router.push('/auth/login')
         return
       }
-      setUser(session.user)
+      setUser(sessionUser)
     }
     init()
   }, [])
@@ -87,6 +93,16 @@ function AnalyzeForm() {
   const handleLogout = async () => {
     await supabase.auth.signOut()
     router.push('/auth/login')
+  }
+
+  // Supabase unreachable: this page's content lives in Postgres, so
+  // there is nothing to show and nowhere useful to redirect to.
+  if (backendDown) {
+    return (
+      <AppShell showTicker={false}>
+        <BackendDownNotice feature="Event analysis" />
+      </AppShell>
+    )
   }
 
   return (

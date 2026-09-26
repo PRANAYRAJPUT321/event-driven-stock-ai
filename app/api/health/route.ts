@@ -40,7 +40,13 @@ async function probe(url: string, headers: Record<string, string>): Promise<Prob
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  // ?scope=supabase skips the upstream probes. The browser uses it to ask
+  // one narrow question — "is the database reachable?" — without paying for
+  // two more cross-internet round trips.
+  const scope = new URL(request.url).searchParams.get('scope')
+  const supabaseOnly = scope === 'supabase'
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
@@ -77,14 +83,16 @@ export async function GET() {
 
   // The keyless upstreams the rest of the app depends on. Checking them here
   // means one URL answers "is anything reachable from this deployment".
-  checks.yahooFinance = await probe(
-    'https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?interval=1d&range=1d',
-    { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }
-  )
-  checks.googleNewsRss = await probe(
-    'https://news.google.com/rss/search?q=nifty&hl=en-IN&gl=IN&ceid=IN:en',
-    { 'User-Agent': 'Mozilla/5.0' }
-  )
+  if (!supabaseOnly) {
+    checks.yahooFinance = await probe(
+      'https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?interval=1d&range=1d',
+      { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }
+    )
+    checks.googleNewsRss = await probe(
+      'https://news.google.com/rss/search?q=nifty&hl=en-IN&gl=IN&ceid=IN:en',
+      { 'User-Agent': 'Mozilla/5.0' }
+    )
+  }
 
   const missingEnv = Object.entries(env)
     .filter(([key, present]) => !present && key !== 'ANTHROPIC_API_KEY')

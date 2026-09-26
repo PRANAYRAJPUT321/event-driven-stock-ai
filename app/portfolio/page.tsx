@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, getSessionUser } from '@/lib/supabase/client'
+import BackendDownNotice from '@/components/BackendDownNotice'
 import AppShell from '@/components/layout/AppShell'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import { getSimulatedPrice } from '@/lib/market/mockData'
@@ -24,6 +25,7 @@ interface PositionWithPnl extends Position {
 
 export default function Portfolio() {
   const router = useRouter()
+  const [backendDown, setBackendDown] = useState(false)
   const supabase = createClient()
   const [user, setUser] = useState<User | null>(null)
   const [positions, setPositions] = useState<PositionWithPnl[]>([])
@@ -36,7 +38,12 @@ export default function Portfolio() {
 
   async function loadPositions() {
     setLoading(true)
-    const { data: { user } } = await supabase.auth.getUser()
+    const { user, backendDown: down } = await getSessionUser()
+    if (down) {
+      setBackendDown(true)
+      setLoading(false)
+      return
+    }
     if (!user) {
       router.push('/auth/login')
       return
@@ -74,6 +81,16 @@ export default function Portfolio() {
   const avgPnl = positions.length
     ? positions.reduce((sum, p) => sum + p.pnlPct, 0) / positions.length
     : 0
+
+  // Supabase unreachable: this page's content lives in Postgres, so
+  // there is nothing to show and nowhere useful to redirect to.
+  if (backendDown) {
+    return (
+      <AppShell showTicker={false}>
+        <BackendDownNotice feature="Your paper portfolio" />
+      </AppShell>
+    )
+  }
 
   return (
     <AppShell userEmail={user?.email} onLogout={handleLogout}>

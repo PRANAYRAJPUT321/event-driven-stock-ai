@@ -76,3 +76,55 @@ export function describeAuthError(error: unknown): string {
 
   return message || 'An error occurred'
 }
+
+export interface SessionState {
+  user: import('@supabase/supabase-js').User | null
+  /**
+   * True when Supabase could not be reached at all, as opposed to being
+   * reached and reporting nobody signed in. The two need opposite handling:
+   * a signed-out visitor should be sent to the login page, but someone whose
+   * backend is down must not be — the login page cannot work either, so
+   * redirecting there is a dead end that looks like the app is broken.
+   */
+  backendDown: boolean
+}
+
+/**
+ * Reads the current user without ever throwing.
+ *
+ * supabase-js rejects when the project is unreachable (a paused free-tier
+ * project does exactly this). Pages called `await supabase.auth.getUser()`
+ * unguarded, so that rejection escaped the effect, `setLoading(false)` never
+ * ran, and the page sat on its loading skeleton forever with nothing in the
+ * UI to say why.
+ */
+export async function getSessionUser(): Promise<SessionState> {
+  if (!isSupabaseConfigured) return { user: null, backendDown: true }
+
+  try {
+    const supabase = createClient()
+    const { data, error } = await supabase.auth.getUser()
+    if (!error && data.user) return { user: data.user, backendDown: false }
+  } catch {
+    // Fall through to the probe — a thrown error and a returned one mean the
+    // same thing here.
+  }
+
+  // Nobody is signed in, and the reason matters. Do not try to infer it from
+  // the error text: with no stored session supabase-js short-circuits without
+  // touching the network, and a refresh against a dead backend reports a
+  // *token* error, so both unreachable cases read as "signed out". Ask the
+  // server instead — it is same-origin, so no CORS, and authoritative.
+  return { user: null, backendDown: !(await isBackendReachable()) }
+}
+
+async function isBackendReachable(): Promise<boolean> {
+  try {
+    const response = await fetch('/api/health?scope=supabase', { cache: 'no-store' })
+    if (!response.ok) return false
+    const data = await response.json()
+    return Boolean(data?.checks?.supabaseAuth?.ok)
+  } catch {
+    return false
+  }
+}

@@ -112,6 +112,14 @@ function LoginForm() {
               Sign up
             </Link>
           </div>
+
+          {/* The live-market pages need no account and no database, so there
+              is somewhere useful to go even when sign-in is impossible. */}
+          <div className="mt-3 text-center text-xs text-ink-faint">
+            <Link href="/markets" className="hover:text-accent hover:underline">
+              Or browse live markets without signing in →
+            </Link>
+          </div>
         </div>
       </div>
     </div>

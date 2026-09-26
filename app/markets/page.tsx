@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, getSessionUser } from '@/lib/supabase/client'
 import AppShell from '@/components/layout/AppShell'
 import type { User } from '@supabase/supabase-js'
 import type { MarketQuote } from '@/lib/market/yahooFinance'
@@ -74,11 +74,11 @@ export default function Markets() {
     let active = true
 
     async function init() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/auth/login')
-        return
-      }
+      // Deliberately no auth guard: every tab on this page comes from keyless
+      // public feeds, so it stays usable signed out — and, more to the point,
+      // while the database is unreachable. The session lookup is only for the
+      // header's email/logout affordance.
+      const { user } = await getSessionUser()
       if (active) setUser(user)
       await load(active)
     }

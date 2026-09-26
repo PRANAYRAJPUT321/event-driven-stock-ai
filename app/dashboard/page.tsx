@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, getSessionUser } from '@/lib/supabase/client'
+import BackendDownNotice from '@/components/BackendDownNotice'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import type { User } from '@supabase/supabase-js'
@@ -66,21 +67,26 @@ export default function Dashboard() {
     byRec: Record<string, { count: number; positive: number }>
   } | null>(null)
   const router = useRouter()
+  const [backendDown, setBackendDown] = useState(false)
   const supabase = createClient()
 
   useEffect(() => {
     const getUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) {
+      const { user: sessionUser, backendDown: down } = await getSessionUser()
+      if (down) {
+        setBackendDown(true)
+        return
+      }
+      if (!sessionUser) {
         router.push('/auth/login')
         return
       }
-      setUser(session.user)
+      setUser(sessionUser)
 
       const { data } = await supabase
         .from('event_analysis')
         .select('id, event_title, recommendation, opportunity_score, affected_sectors, created_at')
-        .eq('user_id', session.user.id)
+        .eq('user_id', sessionUser.id)
         .order('created_at', { ascending: false })
         .limit(100)
 
@@ -123,7 +129,7 @@ export default function Dashboard() {
       const { data: positions } = await supabase
         .from('portfolio_positions')
         .select('symbol, recommendation, entry_price, entry_date')
-        .eq('user_id', session.user.id)
+        .eq('user_id', sessionUser.id)
 
       if (positions && positions.length > 0) {
         const byRec: Record<string, { count: number; positive: number }> = {}
@@ -149,6 +155,16 @@ export default function Dashboard() {
   const handleLogout = async () => {
     await supabase.auth.signOut()
     router.push('/auth/login')
+  }
+
+  // Supabase unreachable: this page's content lives in Postgres, so
+  // there is nothing to show and nowhere useful to redirect to.
+  if (backendDown) {
+    return (
+      <AppShell showTicker={false}>
+        <BackendDownNotice feature="Your dashboard" />
+      </AppShell>
+    )
   }
 
   if (loading) {

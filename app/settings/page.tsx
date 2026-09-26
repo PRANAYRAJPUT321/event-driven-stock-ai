@@ -2,23 +2,29 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, getSessionUser } from '@/lib/supabase/client'
+import BackendDownNotice from '@/components/BackendDownNotice'
 import AppShell from '@/components/layout/AppShell'
 import type { User } from '@supabase/supabase-js'
 
 export default function Settings() {
   const router = useRouter()
+  const [backendDown, setBackendDown] = useState(false)
   const supabase = createClient()
   const [user, setUser] = useState<User | null>(null)
 
   useEffect(() => {
     const init = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) {
+      const { user: sessionUser, backendDown: down } = await getSessionUser()
+      if (down) {
+        setBackendDown(true)
+        return
+      }
+      if (!sessionUser) {
         router.push('/auth/login')
         return
       }
-      setUser(session.user)
+      setUser(sessionUser)
     }
     init()
   }, [])
@@ -26,6 +32,16 @@ export default function Settings() {
   const handleLogout = async () => {
     await supabase.auth.signOut()
     router.push('/auth/login')
+  }
+
+  // Supabase unreachable: this page's content lives in Postgres, so
+  // there is nothing to show and nowhere useful to redirect to.
+  if (backendDown) {
+    return (
+      <AppShell showTicker={false}>
+        <BackendDownNotice feature="Settings" />
+      </AppShell>
+    )
   }
 
   return (

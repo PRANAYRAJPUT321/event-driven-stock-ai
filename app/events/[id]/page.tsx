@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, getSessionUser } from '@/lib/supabase/client'
+import BackendDownNotice from '@/components/BackendDownNotice'
 import { useRouter } from 'next/navigation'
 import AppShell from '@/components/layout/AppShell'
 import ScoreGauge from '@/components/charts/ScoreGauge'
@@ -84,12 +85,18 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   const [userId, setUserId] = useState<string | null>(null)
   const [user, setUser] = useState<User | null>(null)
   const router = useRouter()
+  const [backendDown, setBackendDown] = useState(false)
   const supabase = createClient()
 
   useEffect(() => {
     const fetchAnalysis = async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser()
+        const { user, backendDown: down } = await getSessionUser()
+        if (down) {
+          setBackendDown(true)
+          setLoading(false)
+          return
+        }
         if (!user) {
           router.push('/auth/login')
           return
@@ -215,6 +222,16 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   const handleLogout = async () => {
     await supabase.auth.signOut()
     router.push('/auth/login')
+  }
+
+  // Supabase unreachable: this page's content lives in Postgres, so
+  // there is nothing to show and nowhere useful to redirect to.
+  if (backendDown) {
+    return (
+      <AppShell showTicker={false}>
+        <BackendDownNotice feature="This analysis" />
+      </AppShell>
+    )
   }
 
   if (loading) {
