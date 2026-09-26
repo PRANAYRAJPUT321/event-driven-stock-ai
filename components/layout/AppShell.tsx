@@ -4,7 +4,8 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import CommandPalette from '@/components/CommandPalette'
-import MarketTicker from '@/components/MarketTicker'
+import MarketBar from '@/components/MarketBar'
+import NewsTicker from '@/components/NewsTicker'
 import ThemeToggle from '@/components/ui/ThemeToggle'
 import { createClient } from '@/lib/supabase/client'
 
@@ -161,7 +162,17 @@ export default function AppShell({
             </Link>
           ))}
         </nav>
-        {showTicker && <MarketTicker />}
+        {showTicker && (
+          <>
+            <MarketBar />
+            {/* Prices are the priority on a phone: the header is already
+                logo + nav + bar tall there, so the headline strip is desktop
+                only (Discover and the dashboard carry the same stories). */}
+            <div className="hidden md:block">
+              <NewsTicker />
+            </div>
+          </>
+        )}
       </header>
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-10">{children}</main>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />

@@ -11,6 +11,7 @@ import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import ScoreChip from '@/components/ui/ScoreChip'
 import { getMockTechnical } from '@/lib/market/mockData'
 import type { User } from '@supabase/supabase-js'
+import type { MarketQuote } from '@/lib/market/yahooFinance'
 
 interface StockScore {
   id: string
@@ -38,17 +39,6 @@ interface ClassificationJson {
   economic_variable: string
   direction: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL'
   transmission_explanation?: string
-}
-
-interface MarketSnapshot {
-  id: string
-  asset_type: 'index' | 'crypto'
-  symbol: string
-  name: string
-  region: string | null
-  price: number | null
-  change_pct: number | null
-  fetched_at: string
 }
 
 // Event types/economic variables where showing live global-market context
@@ -89,7 +79,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   const [watchingId, setWatchingId] = useState<string | null>(null)
   const [positionedIds, setPositionedIds] = useState<Set<string>>(new Set())
   const [positioningId, setPositioningId] = useState<string | null>(null)
-  const [marketContext, setMarketContext] = useState<MarketSnapshot[]>([])
+  const [marketContext, setMarketContext] = useState<MarketQuote[]>([])
   const [userId, setUserId] = useState<string | null>(null)
   const [user, setUser] = useState<User | null>(null)
   const router = useRouter()
@@ -160,18 +150,24 @@ export default function EventDetails({ params }: { params: { id: string } }) {
     if (!triggered) return
 
     async function loadMarketContext() {
-      const { data } = await supabase
-        .from('market_snapshots')
-        .select('id, asset_type, symbol, name, region, price, change_pct, fetched_at')
-        .eq('asset_type', 'index')
-
-      // market_snapshots has one row per (asset_type, symbol) — upserted in
-      // place on refresh, so no dedup needed. Just surface the most notable
-      // moves first.
-      const sorted = [...(data || [])].sort(
-        (a, b) => Math.abs(b.change_pct ?? 0) - Math.abs(a.change_pct ?? 0)
-      )
-      setMarketContext(sorted.slice(0, 4))
+      // Live from the keyless market endpoint rather than a cached table, so
+      // the context shown next to an event is today's market, not whenever
+      // someone last pressed a refresh button.
+      try {
+        const response = await fetch('/api/market/live')
+        if (!response.ok) return
+        const data = await response.json()
+        const indices = ((data.quotes || []) as MarketQuote[]).filter(
+          (q) => q.category === 'domestic' || q.category === 'international'
+        )
+        // Biggest absolute movers first — those are the ones worth showing.
+        const sorted = [...indices].sort(
+          (a, b) => Math.abs(b.changePct) - Math.abs(a.changePct)
+        )
+        setMarketContext(sorted.slice(0, 4))
+      } catch {
+        // Context is supplementary; a failure here must not break the page.
+      }
     }
 
     loadMarketContext()
@@ -323,18 +319,20 @@ export default function EventDetails({ params }: { params: { id: string } }) {
           </div>
           <p className="text-xs text-ink-faint mb-4">
             This event&apos;s classification ({classification?.economic_variable || classification?.event_type}) is
-            the kind that transmits through world markets — here&apos;s how major indices stood as of the last refresh.
+            the kind that transmits through world markets — here&apos;s where the major indices are right now.
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {marketContext.map((s) => (
-              <div key={s.id} className="border border-border rounded-lg p-3">
-                <p className="font-mono text-[10px] text-ink-faint uppercase truncate">{s.region || s.symbol}</p>
-                <p className="font-semibold text-ink text-xs truncate" title={s.name}>
-                  {s.name}
+            {marketContext.map((q) => (
+              <div key={q.symbol} className="border border-border rounded-lg p-3 tile-hover">
+                <p className="font-mono text-[10px] text-ink-faint uppercase truncate">
+                  {q.category === 'domestic' ? 'India' : 'Global'}
                 </p>
-                <p className={`mono-tabular text-sm font-bold ${(s.change_pct ?? 0) >= 0 ? 'text-buy' : 'text-avoid'}`}>
-                  {(s.change_pct ?? 0) >= 0 ? '+' : ''}
-                  {s.change_pct?.toFixed(2)}%
+                <p className="font-semibold text-ink text-xs truncate" title={q.name}>
+                  {q.name}
+                </p>
+                <p className={`mono-tabular text-sm font-bold ${q.changePct >= 0 ? 'text-buy' : 'text-avoid'}`}>
+                  {q.changePct >= 0 ? '+' : ''}
+                  {q.changePct.toFixed(2)}%
                 </p>
               </div>
             ))}
