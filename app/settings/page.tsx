@@ -67,7 +67,7 @@ export default function Settings() {
             <h3 className="text-sm font-bold text-ink mb-4">Account</h3>
             <button
               onClick={handleLogout}
-              className="bg-avoid-dim hover:bg-avoid hover:text-[#0a0d14] text-avoid border border-avoid-dim px-4 py-2 rounded-lg font-medium text-sm transition"
+              className="bg-avoid-dim hover:bg-avoid hover:text-on-accent text-avoid border border-avoid-dim px-4 py-2 rounded-lg font-medium text-sm transition"
             >
               Logout
             </button>

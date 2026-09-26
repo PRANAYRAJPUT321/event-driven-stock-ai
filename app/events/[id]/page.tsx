@@ -262,7 +262,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
           className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
             saved
               ? 'bg-buy-dim text-buy border border-buy-dim cursor-default'
-              : 'bg-accent hover:bg-accent-bright text-[#0a0d14] disabled:opacity-50'
+              : 'bg-accent hover:bg-accent-bright text-on-accent disabled:opacity-50'
           }`}
         >
           {saved ? '✓ Saved' : saving ? 'Saving…' : 'Save Analysis'}

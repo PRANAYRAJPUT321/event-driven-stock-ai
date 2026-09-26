@@ -133,7 +133,7 @@ export default function Watchlist() {
             <p className="text-ink-muted text-sm mt-2">Add stocks from an event analysis to monitor them here</p>
             <button
               onClick={() => router.push('/analyze')}
-              className="mt-6 bg-accent hover:bg-accent-bright text-[#0a0d14] font-semibold px-6 py-2 rounded-lg transition"
+              className="mt-6 bg-accent hover:bg-accent-bright text-on-accent font-semibold px-6 py-2 rounded-lg transition"
             >
               Analyze an Event
             </button>

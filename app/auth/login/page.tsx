@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import ThemeToggle from '@/components/ui/ThemeToggle'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 
@@ -35,12 +36,15 @@ function LoginForm() {
   }
 
   return (
-    <div className="min-h-screen grid-backdrop flex items-center justify-center px-4 font-sans text-ink">
+    <div className="relative min-h-screen grid-backdrop flex items-center justify-center px-4 font-sans text-ink">
+      <div className="absolute top-4 right-4">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-md fade-in">
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 mb-3">
             <span className="live-dot" />
-            <span className="font-mono text-2xl font-bold tracking-tight">PULSE</span>
+            <span className="font-mono text-2xl font-bold tracking-tight neon-text">PULSE</span>
           </div>
           <p className="text-ink-muted text-sm">Event-driven stock intelligence for Indian equities</p>
         </div>
@@ -85,7 +89,7 @@ function LoginForm() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-accent hover:bg-accent-bright disabled:opacity-50 text-[#0a0d14] font-semibold py-2.5 px-4 rounded-lg transition"
+              className="w-full bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold py-2.5 px-4 rounded-lg transition"
             >
               {loading ? 'Signing in…' : 'Sign In'}
             </button>

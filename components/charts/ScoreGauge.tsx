@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from 'react'
 
+// Signal colours come from the theme tokens rather than literals so the
+// gauge re-tints with light/dark instead of glowing dark-mode neon on white.
 function zoneMeta(score: number) {
-  if (score >= 90) return { color: '#34d399', label: 'Very Strong' }
-  if (score >= 75) return { color: '#34d399', label: 'Strong' }
-  if (score >= 60) return { color: '#fbbf24', label: 'Moderate' }
-  if (score >= 40) return { color: '#fbbf24', label: 'Neutral' }
-  return { color: '#f87171', label: 'Weak' }
+  if (score >= 90) return { color: 'var(--buy)', label: 'Very Strong' }
+  if (score >= 75) return { color: 'var(--buy)', label: 'Strong' }
+  if (score >= 60) return { color: 'var(--hold)', label: 'Moderate' }
+  if (score >= 40) return { color: 'var(--hold)', label: 'Neutral' }
+  return { color: 'var(--avoid)', label: 'Weak' }
 }
 
 export default function ScoreGauge({ score, size = 176 }: { score: number; size?: number }) {
@@ -41,7 +43,7 @@ export default function ScoreGauge({ score, size = 176 }: { score: number; size?
           strokeDashoffset={offset}
           style={{
             transition: 'stroke-dashoffset 1.2s cubic-bezier(0.16,1,0.3,1)',
-            filter: `drop-shadow(0 0 6px ${color}aa)`,
+            filter: `drop-shadow(0 0 var(--neon-blur) ${color})`,
           }}
         />
       </svg>

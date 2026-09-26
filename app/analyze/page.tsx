@@ -135,7 +135,7 @@ function AnalyzeForm() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-accent hover:bg-accent-bright disabled:opacity-50 text-[#0a0d14] font-semibold py-3 px-6 rounded-lg transition"
+              className="w-full bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold py-3 px-6 rounded-lg transition"
             >
               {loading ? 'Classifying event, scoring stocks…' : 'Analyze Event'}
             </button>

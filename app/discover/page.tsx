@@ -94,7 +94,7 @@ export default function Discover() {
         <button
           onClick={handleRefresh}
           disabled={refreshing}
-          className="flex-shrink-0 bg-accent hover:bg-accent-bright disabled:opacity-50 text-[#0a0d14] font-semibold px-4 py-2.5 rounded-lg text-sm transition"
+          className="flex-shrink-0 bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold px-4 py-2.5 rounded-lg text-sm transition"
         >
           {refreshing ? 'Fetching…' : '↻ Refresh News'}
         </button>
@@ -113,7 +113,7 @@ export default function Discover() {
             onClick={() => setFilter(s)}
             className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium border transition ${
               filter === s
-                ? 'bg-accent text-[#0a0d14] border-accent'
+                ? 'bg-accent text-on-accent border-accent'
                 : 'bg-surface text-ink-muted border-border hover:border-border-bright'
             }`}
           >
@@ -137,7 +137,7 @@ export default function Discover() {
           <button
             onClick={handleRefresh}
             disabled={refreshing}
-            className="bg-accent hover:bg-accent-bright disabled:opacity-50 text-[#0a0d14] font-semibold px-6 py-2 rounded-lg transition"
+            className="bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold px-6 py-2 rounded-lg transition"
           >
             {refreshing ? 'Fetching…' : 'Refresh News'}
           </button>
@@ -182,7 +182,7 @@ export default function Discover() {
                 </div>
                 <button
                   onClick={() => analyzeNews(item)}
-                  className="flex-shrink-0 bg-surface-2 hover:bg-accent hover:text-[#0a0d14] border border-border-bright text-ink text-sm font-medium px-4 py-2 rounded-lg transition"
+                  className="flex-shrink-0 bg-surface-2 hover:bg-accent hover:text-on-accent border border-border-bright text-ink text-sm font-medium px-4 py-2 rounded-lg transition"
                 >
                   Analyze
                 </button>

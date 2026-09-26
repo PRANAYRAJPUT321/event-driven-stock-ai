@@ -1,7 +1,11 @@
 import type { Config } from 'tailwindcss'
 
 const config: Config = {
-  darkMode: 'class',
+  // Themes are driven by the data-theme attribute the anti-FOUC script in
+  // app/layout.tsx writes on <html>, not by a `dark` class — so the `dark:`
+  // variant (unused in this codebase) is pointed at the same attribute to
+  // keep the two from disagreeing if one is ever added.
+  darkMode: ['class', '[data-theme="dark"]'],
   content: [
     './app/**/*.{js,ts,jsx,tsx,mdx}',
     './components/**/*.{js,ts,jsx,tsx,mdx}',
@@ -28,6 +32,16 @@ const config: Config = {
           dim: 'var(--accent-dim)',
           bright: 'var(--accent-bright)',
         },
+        // Magenta counterpart to the cyan accent, for the second series in a
+        // chart / secondary emphasis without reaching for a signal colour.
+        accent2: {
+          DEFAULT: 'var(--accent-2)',
+          dim: 'var(--accent-2-dim)',
+        },
+        // Legible text on top of a filled accent or signal surface. Flips with
+        // the theme (near-black in dark, white in light), which is why no page
+        // should hardcode a hex for this.
+        'on-accent': 'var(--on-accent)',
         buy: {
           DEFAULT: 'var(--buy)',
           dim: 'var(--buy-dim)',
@@ -46,11 +60,13 @@ const config: Config = {
         sans: ['var(--font-manrope)', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
       },
       boxShadow: {
-        panel: '0 1px 0 0 rgba(255,255,255,0.03) inset, 0 20px 40px -20px rgba(0,0,0,0.6)',
-        glow: '0 0 0 1px var(--accent-dim), 0 0 24px -4px var(--accent)',
+        panel: 'var(--panel-shadow)',
+        glow: '0 0 0 1px var(--accent-dim), 0 0 24px -4px var(--glow)',
+        'glow-2': '0 0 0 1px var(--accent-2-dim), 0 0 24px -4px var(--glow-2)',
+        tile: 'var(--tile-shadow)',
       },
       backgroundImage: {
-        grid: 'linear-gradient(rgba(230,233,240,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(230,233,240,0.035) 1px, transparent 1px)',
+        grid: 'linear-gradient(var(--grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--grid-line) 1px, transparent 1px)',
       },
       backgroundSize: {
         grid: '32px 32px',

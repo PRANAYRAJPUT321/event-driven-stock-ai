@@ -123,7 +123,7 @@ export default function Portfolio() {
             </p>
             <button
               onClick={() => router.push('/analyze')}
-              className="mt-6 bg-accent hover:bg-accent-bright text-[#0a0d14] font-semibold px-6 py-2 rounded-lg transition"
+              className="mt-6 bg-accent hover:bg-accent-bright text-on-accent font-semibold px-6 py-2 rounded-lg transition"
             >
               Analyze an Event
             </button>

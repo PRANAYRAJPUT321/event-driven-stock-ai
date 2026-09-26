@@ -121,7 +121,7 @@ export default function Markets() {
         <button
           onClick={handleRefresh}
           disabled={refreshing}
-          className="flex-shrink-0 bg-accent hover:bg-accent-bright disabled:opacity-50 text-[#0a0d14] font-semibold px-4 py-2.5 rounded-lg text-sm transition"
+          className="flex-shrink-0 bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold px-4 py-2.5 rounded-lg text-sm transition"
         >
           {refreshing ? 'Fetching…' : '↻ Refresh Markets'}
         </button>
@@ -141,7 +141,7 @@ export default function Markets() {
               onClick={() => setTab(t)}
               className={`px-4 py-1.5 rounded-full text-sm font-medium border transition ${
                 tab === t
-                  ? 'bg-accent text-[#0a0d14] border-accent'
+                  ? 'bg-accent text-on-accent border-accent'
                   : 'bg-surface text-ink-muted border-border hover:border-border-bright'
               }`}
             >
@@ -172,7 +172,7 @@ export default function Markets() {
           <button
             onClick={handleRefresh}
             disabled={refreshing}
-            className="bg-accent hover:bg-accent-bright disabled:opacity-50 text-[#0a0d14] font-semibold px-6 py-2 rounded-lg transition"
+            className="bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold px-6 py-2 rounded-lg transition"
           >
             {refreshing ? 'Fetching…' : 'Refresh Markets'}
           </button>

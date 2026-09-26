@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import CommandPalette from '@/components/CommandPalette'
 import MarketTicker from '@/components/MarketTicker'
+import ThemeToggle from '@/components/ui/ThemeToggle'
 import { createClient } from '@/lib/supabase/client'
 
 const NAV = [
@@ -97,7 +98,7 @@ export default function AppShell({
           <div className="flex items-center gap-8">
             <Link href="/dashboard" className="flex items-center gap-2">
               <span className="live-dot" />
-              <span className="font-mono text-lg font-bold tracking-tight text-ink">PULSE</span>
+              <span className="font-mono text-lg font-bold tracking-tight neon-text">PULSE</span>
             </Link>
             <nav className="hidden md:flex items-center gap-1">
               {NAV.map((item) => (
@@ -106,13 +107,13 @@ export default function AppShell({
                   href={item.href}
                   className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
                     pathname === item.href
-                      ? 'bg-surface-2 text-ink'
+                      ? 'bg-surface-2 text-accent shadow-glow'
                       : 'text-ink-muted hover:text-ink hover:bg-surface'
                   }`}
                 >
                   {item.label}
                   {item.href === '/watchlist' && watchlistAlerts > 0 && (
-                    <span className="ml-1.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-accent text-[#0a0d14] text-[10px] font-bold font-mono">
+                    <span className="ml-1.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-accent text-on-accent text-[10px] font-bold font-mono">
                       {watchlistAlerts}
                     </span>
                   )}
@@ -120,7 +121,8 @@ export default function AppShell({
               ))}
             </nav>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ThemeToggle />
             <button
               onClick={() => setPaletteOpen(true)}
               className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border text-ink-faint text-xs hover:border-border-bright hover:text-ink-muted transition"
@@ -146,13 +148,13 @@ export default function AppShell({
               href={item.href}
               className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition ${
                 pathname === item.href
-                  ? 'bg-surface-2 text-ink border-border-bright'
-                  : 'text-ink-muted border-border hover:text-ink'
+                  ? 'bg-surface-2 text-accent border-accent-dim'
+                  : 'text-ink-muted border-border hover:text-ink hover:border-accent-dim'
               }`}
             >
               {item.label}
               {item.href === '/watchlist' && watchlistAlerts > 0 && (
-                <span className="ml-1 inline-flex items-center justify-center min-w-[14px] h-3.5 px-1 rounded-full bg-accent text-[#0a0d14] text-[9px] font-bold font-mono">
+                <span className="ml-1 inline-flex items-center justify-center min-w-[14px] h-3.5 px-1 rounded-full bg-accent text-on-accent text-[9px] font-bold font-mono">
                   {watchlistAlerts}
                 </span>
               )}

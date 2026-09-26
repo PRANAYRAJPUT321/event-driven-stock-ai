@@ -164,7 +164,7 @@ export default function StockProfile({ params }: { params: { symbol: string } })
           />
           <button
             type="submit"
-            className="bg-accent hover:bg-accent-bright text-[#0a0d14] font-semibold px-4 py-2 rounded-lg text-sm transition"
+            className="bg-accent hover:bg-accent-bright text-on-accent font-semibold px-4 py-2 rounded-lg text-sm transition"
           >
             Go
           </button>
@@ -178,7 +178,7 @@ export default function StockProfile({ params }: { params: { symbol: string } })
             onClick={() => router.push(`/stocks/${s}`)}
             className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium border transition ${
               s === symbol
-                ? 'bg-accent text-[#0a0d14] border-accent'
+                ? 'bg-accent text-on-accent border-accent'
                 : 'bg-surface text-ink-muted border-border hover:border-border-bright'
             }`}
           >

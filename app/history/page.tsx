@@ -70,7 +70,7 @@ export default function History() {
             onClick={() => setFilter(f)}
             className={`px-4 py-1.5 rounded-full text-sm font-medium border transition ${
               filter === f
-                ? 'bg-accent text-[#0a0d14] border-accent'
+                ? 'bg-accent text-on-accent border-accent'
                 : 'bg-surface text-ink-muted border-border hover:border-border-bright'
             }`}
           >
@@ -92,7 +92,7 @@ export default function History() {
             {rows.length === 0 && (
               <button
                 onClick={() => router.push('/analyze')}
-                className="mt-6 bg-accent hover:bg-accent-bright text-[#0a0d14] font-semibold px-6 py-2 rounded-lg transition"
+                className="mt-6 bg-accent hover:bg-accent-bright text-on-accent font-semibold px-6 py-2 rounded-lg transition"
               >
                 Analyze First Event
               </button>
