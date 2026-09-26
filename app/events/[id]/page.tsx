@@ -9,6 +9,7 @@ import TransmissionFlow from '@/components/charts/TransmissionFlow'
 import ReturnSparkline from '@/components/charts/ReturnSparkline'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import ScoreChip from '@/components/ui/ScoreChip'
+import NewsImpactPanel from '@/components/NewsImpactPanel'
 import { getMockTechnical } from '@/lib/market/mockData'
 import type { User } from '@supabase/supabase-js'
 import type { MarketQuote } from '@/lib/market/yahooFinance'
@@ -339,6 +340,13 @@ export default function EventDetails({ params }: { params: { id: string } }) {
           </div>
         </div>
       )}
+
+      {/* Live news impact: the mechanism above, checked against what is
+          actually being published about those sectors and companies. */}
+      <NewsImpactPanel
+        sectors={analysis.affected_sectors || []}
+        companies={stocks.slice(0, 3).map((stock) => ({ symbol: stock.stock_symbol }))}
+      />
 
       {/* Historical Event Evidence */}
       {analysis.historical_summary && analysis.historical_summary.matchCount > 0 && (

@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "test:rules": "node scripts/test-rules.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",
@@ -16,6 +17,7 @@
     "axios": "^1.6.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.0.0",
+    "fast-xml-parser": "^5.11.1",
     "lucide-react": "^0.294.0",
     "next": "^14.0.0",
     "react": "^18.2.0",

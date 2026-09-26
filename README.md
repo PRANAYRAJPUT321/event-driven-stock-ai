@@ -17,7 +17,10 @@ Unlike generic stock recommendation systems, this platform is **event-driven** -
 - **🎯 Event Opportunity Scoring** - 0-100 score combining all signals with explainable reasoning
 - **🔄 Counter-Argument Engine** - Provides bull/bear cases and key risks before recommendations
 - **🔐 Secure User Accounts** - Save analyses, build watchlists with Row Level Security
-- **📰 Live News Discovery** - Auto-categorizes breaking financial news by sector (Phase 2)
+- **📰 Live News Discovery** - Auto-categorizes breaking financial news by sector
+- **📊 Live Market Bar** - Domestic and world indices, commodities and INR crosses on every page
+- **📡 Live News Impact** - Per-event feed of what is being published about the affected sectors and companies
+- **🌗 Neon light & dark themes** - Theme set before first paint, remembered per browser
 
 ## 🏗️ Tech Stack
 
@@ -25,9 +28,10 @@ Unlike generic stock recommendation systems, this platform is **event-driven** -
 - **Backend:** Next.js API Routes + Server Actions
 - **Database:** Supabase PostgreSQL with Row Level Security
 - **Authentication:** Supabase Auth (Email/Password)
-- **AI:** Claude 3 (Anthropic API)
+- **AI:** Claude (Anthropic API), optional — a deterministic rule engine takes over whenever it is unavailable
 - **Deployment:** Vercel
-- **News:** NewsAPI for live financial news
+- **Market data:** Yahoo Finance + CoinGecko (keyless public endpoints)
+- **News:** Google News and Yahoo Finance RSS (keyless)
 
 ## 📋 Session Progress
 
@@ -57,9 +61,11 @@ Unlike generic stock recommendation systems, this platform is **event-driven** -
 ### Prerequisites
 - Node.js 18+
 - npm or yarn
-- Supabase account (free tier)
-- Anthropic API key
-- NewsAPI key (optional)
+- Supabase account (free tier) — the only required service
+- Anthropic API key (optional; without it the app uses its offline rule engine)
+
+No other keys are needed: market, crypto and news data all come from keyless
+public feeds.
 
 ### Installation
 
@@ -80,6 +86,16 @@ npm run dev
 ```
 
 Visit http://localhost:3000
+
+### Tests
+
+```bash
+npm run test:rules
+```
+
+Exercises the parts that must keep working with no API keys and no network:
+the deterministic event classifier, the RSS parser, and the Yahoo Finance
+response parser. No test framework or extra dependency required.
 
 ## 📊 Database Schema
 

@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { fetchFinancialNews } from '@/lib/news/fetchNews'
+import { fetchMarketNews } from '@/lib/news/rssNews'
 import { categorizeNewsItem } from '@/lib/ai/eventClassifier'
 import crypto from 'crypto'
 
-const MAX_TO_CATEGORIZE = 12
+// Categorisation is now free when no LLM key is configured (the rule engine
+// answers instead), so this is no longer a per-article cost ceiling — it's
+// just a bound on how much work one request does.
+const MAX_TO_CATEGORIZE = 20
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,9 +22,12 @@ export async function POST(request: NextRequest) {
 
     const admin = createAdminClient()
 
+    // Google News RSS — no key, and unlike NewsAPI's free tier it does not
+    // refuse server-to-server calls from a deployed domain, which is why the
+    // feed never populated in production before.
     let articles
     try {
-      articles = await fetchFinancialNews()
+      articles = await fetchMarketNews()
     } catch (fetchError: any) {
       return NextResponse.json(
         { error: `News source unavailable: ${fetchError.message}` },
@@ -29,7 +35,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Skip articles already in the DB (by hash) before spending AI calls on them.
+    if (articles.length === 0) {
+      return NextResponse.json(
+        { error: 'The news feed returned no articles. This is usually a transient upstream issue.' },
+        { status: 502 }
+      )
+    }
+
+    // Skip articles already stored (by hash) before doing any work on them.
     const hashed = articles.map((a) => ({
       article: a,
       hash: crypto.createHash('sha256').update(a.title + (a.url || '')).digest('hex'),
@@ -44,45 +57,43 @@ export async function POST(request: NextRequest) {
     const fresh = hashed.filter((h) => !existingHashes.has(h.hash)).slice(0, MAX_TO_CATEGORIZE)
 
     let inserted = 0
-    let categorizeFailures = 0
-    let lastCategorizeError: any = null
+    let skippedIrrelevant = 0
+    const insertErrors: string[] = []
+
     for (const { article, hash } of fresh) {
-      let categorization
-      try {
-        categorization = await categorizeNewsItem(article.title, article.description || '')
-      } catch (err) {
-        // Skip articles the AI fails to categorize rather than failing the whole
-        // batch — but if EVERY article in this batch fails, that's a systemic
-        // problem (bad API key, no credits, model unavailable), not 12 unlucky
-        // articles, and the caller needs to see that instead of a silent "0
-        // relevant" result.
-        categorizeFailures++
-        lastCategorizeError = err
+      // categorizeNewsItem falls back to the offline rule engine on any AI
+      // failure, so it resolves even with no ANTHROPIC_API_KEY set at all —
+      // this loop can no longer fail wholesale on a billing state.
+      const categorization = await categorizeNewsItem(article.title, article.description || '')
+
+      if (!categorization.is_market_relevant) {
+        skippedIrrelevant++
         continue
       }
-
-      if (!categorization.is_market_relevant) continue
 
       const { error: insertError } = await admin.from('news_feeds').insert({
         title: article.title,
         description: article.description,
         url: article.url,
-        source: article.source?.name || 'Unknown',
-        image_url: article.urlToImage,
+        source: article.source,
+        image_url: article.imageUrl,
         published_at: article.publishedAt,
-        content: article.content,
+        content: article.description,
         event_type: categorization.event_type,
         detected_sectors: categorization.affected_sectors,
         relevance_score: categorization.relevance_score,
         source_hash: hash,
       })
 
-      if (!insertError) inserted++
+      if (insertError) insertErrors.push(insertError.message)
+      else inserted++
     }
 
-    if (fresh.length > 0 && categorizeFailures === fresh.length) {
+    // Every fresh article failing to insert means a schema/permission problem,
+    // not unlucky articles — surface it rather than reporting "0 new items".
+    if (fresh.length > 0 && insertErrors.length === fresh.length - skippedIrrelevant && inserted === 0) {
       return NextResponse.json(
-        { error: `AI categorization failed for every article: ${lastCategorizeError?.message || 'unknown error'}` },
+        { error: `Could not store any article: ${insertErrors[0]}` },
         { status: 502 }
       )
     }
@@ -91,6 +102,7 @@ export async function POST(request: NextRequest) {
       success: true,
       fetched: articles.length,
       alreadyKnown: hashed.length - fresh.length,
+      skippedIrrelevant,
       inserted,
     })
   } catch (error: any) {
