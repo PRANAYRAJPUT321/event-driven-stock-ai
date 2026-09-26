@@ -62,7 +62,17 @@ export default function Discover() {
       if (!response.ok) {
         setRefreshMsg(result.error || 'Refresh failed')
       } else {
-        setRefreshMsg(`Found ${result.inserted} new relevant item(s) from ${result.fetched} fetched`)
+        // A bare "0 new items" reads as a bug. The route reports why the
+        // number is zero — already stored, or filtered as not market
+        // relevant — so say which.
+        const detail = [
+          result.alreadyKnown ? `${result.alreadyKnown} already known` : '',
+          result.skippedIrrelevant ? `${result.skippedIrrelevant} not market relevant` : '',
+        ].filter(Boolean)
+        setRefreshMsg(
+          `Found ${result.inserted} new item(s) from ${result.fetched} headlines` +
+            (detail.length > 0 ? ` (${detail.join(', ')})` : '')
+        )
         await loadNews()
       }
     } catch (err: any) {
