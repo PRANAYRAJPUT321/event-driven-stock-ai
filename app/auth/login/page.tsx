@@ -1,7 +1,7 @@
 'use client'
 
 import { Suspense, useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, describeAuthError, isSupabaseConfigured } from '@/lib/supabase/client'
 import ThemeToggle from '@/components/ui/ThemeToggle'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
@@ -24,12 +24,12 @@ function LoginForm() {
     try {
       const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
       if (authError) {
-        setError(authError.message)
+        setError(describeAuthError(authError))
         return
       }
       router.push('/dashboard')
     } catch (err: any) {
-      setError(err.message || 'An error occurred')
+      setError(describeAuthError(err))
     } finally {
       setLoading(false)
     }
@@ -48,6 +48,17 @@ function LoginForm() {
           </div>
           <p className="text-ink-muted text-sm">Event-driven stock intelligence for Indian equities</p>
         </div>
+
+        {!isSupabaseConfigured && (
+          <div className="bg-avoid-dim border border-avoid-dim text-avoid px-4 py-3 rounded-lg mb-5 text-sm">
+            This deployment was built without Supabase credentials, so sign-in cannot work yet.
+            Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY on the project and
+            redeploy — they are baked in at build time.{' '}
+            <a href="/api/health" className="underline font-medium">
+              Run diagnostics
+            </a>
+          </div>
+        )}
 
         <div className="panel-elevated shadow-panel p-8">
           {message && (
@@ -88,7 +99,7 @@ function LoginForm() {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !isSupabaseConfigured}
               className="w-full bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold py-2.5 px-4 rounded-lg transition"
             >
               {loading ? 'Signing in…' : 'Sign In'}
