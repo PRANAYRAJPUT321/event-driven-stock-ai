@@ -90,10 +90,29 @@ function num(value: unknown): number | null {
 }
 
 /**
+ * The close of the previous trading session.
+ *
+ * Deriving this from the series rather than from meta is deliberate.
+ * `meta.chartPreviousClose` is the close before the *requested range*, not
+ * before today — so with range=5d it yields a five-day move presented as
+ * "today's move". The second-to-last point of a daily series is the prior
+ * session in both states that matter: mid-session the last point is today's
+ * running bar, and after the close it is today's final bar.
+ *
+ * meta is still the fallback for instruments that return no usable series
+ * (thin FX and futures feeds do this), where chartPreviousClose is the only
+ * previous close on offer and a range-wide move beats no move at all.
+ */
+export function previousSessionClose(closes: unknown[], meta: any): number | null {
+  const series = closes.map(num).filter((c): c is number => c !== null)
+  if (series.length >= 2) return series[series.length - 2]
+  return num(meta?.previousClose) ?? num(meta?.chartPreviousClose) ?? series[0] ?? null
+}
+
+/**
  * Yahoo's `meta` gives the last price and a previous close, but which field
  * carries the previous close varies by instrument (indices use
- * chartPreviousClose, FX and futures often only set previousClose). Fall back
- * across all of them, and as a last resort use the first close in the series.
+ * chartPreviousClose, FX and futures often only set previousClose).
  */
 export function parseChart(body: any, tracked: TrackedSymbol): MarketQuote | null {
   const result = body?.chart?.result?.[0]
@@ -107,10 +126,8 @@ export function parseChart(body: any, tracked: TrackedSymbol): MarketQuote | nul
   if (price === null) return null
 
   const closes: unknown[] = result?.indicators?.quote?.[0]?.close ?? []
-  const firstClose = closes.map(num).find((c) => c !== null) ?? null
-
   const previousClose =
-    num(meta.chartPreviousClose) ?? num(meta.previousClose) ?? firstClose ?? price
+    previousSessionClose(closes, meta) ?? price
 
   const change = price - previousClose
   // Guard the divide: a zero previous close would otherwise produce Infinity

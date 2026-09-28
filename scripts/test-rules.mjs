@@ -223,6 +223,23 @@ check('series close used when neither previous-close field is set', fb.previousC
 const zero = parseChart({ chart: { result: [{ meta: { regularMarketPrice: 10, chartPreviousClose: 0 } }] } }, T)
 check('zero previous close cannot produce Infinity', zero.changePct, 0)
 
+// The bar requests range=5d, where meta.chartPreviousClose is the close
+// BEFORE those five days. Using it would report a five-day move as today's.
+// The prior session is the second-to-last point of the daily series.
+const fiveDay = parseChart({ chart: { result: [{
+  meta: { regularMarketPrice: 105, chartPreviousClose: 100, previousClose: 104 },
+  indicators: { quote: [{ close: [100, 101, 102, 104, 105] }] },
+}] } }, T)
+check('prior session close comes from the series, not the range start', fiveDay.previousClose, 104)
+check('so the change is one session, not five', Number(fiveDay.changePct.toFixed(4)), 0.9615)
+
+// A thin feed with no usable series still has to produce something.
+const thin = parseChart({ chart: { result: [{
+  meta: { regularMarketPrice: 50, previousClose: 49 },
+  indicators: { quote: [{ close: [null] }] },
+}] } }, T)
+check('meta is the fallback when the series is unusable', thin.previousClose, 49)
+
 check('yahoo error payload yields null', parseChart({ chart: { result: null, error: { code: 'Not Found' } } }, T), null)
 check('empty body yields null', parseChart({}, T), null)
 check('response without a price yields null', parseChart({ chart: { result: [{ meta: { currency: 'USD' } }] } }, T), null)

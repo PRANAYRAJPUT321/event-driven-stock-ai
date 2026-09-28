@@ -22,6 +22,8 @@
  * Server-side only.
  */
 
+import { previousSessionClose } from './yahooFinance'
+
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 
@@ -266,9 +268,12 @@ const SUMMARY_MODULES =
 export async function fetchStockQuote(symbol: string): Promise<StockQuote> {
   const yahooSymbol = toYahooSymbol(symbol)
 
-  // Tier 1 — always attempted, and the source of truth for price.
+  // Tier 1 — always attempted, and the source of truth for price. 5 days is
+  // enough to identify the previous session while surviving a long weekend;
+  // a longer range would not help, since the prior close comes from the
+  // series rather than from meta (see previousSessionClose).
   const chartResponse = await yahooFetch(
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?range=1mo&interval=1d`
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?range=5d&interval=1d`
   )
   if (!chartResponse.ok) {
     throw new Error(
@@ -286,7 +291,13 @@ export async function fetchStockQuote(symbol: string): Promise<StockQuote> {
   }
 
   const price = num(meta.regularMarketPrice)
-  const previousClose = num(meta.chartPreviousClose) ?? num(meta.previousClose)
+  // Same correction as the market bar: meta.chartPreviousClose is the close
+  // before the requested range, so using it would label a multi-day move as
+  // "% today" on the profile header.
+  const previousClose = previousSessionClose(
+    chartResult?.indicators?.quote?.[0]?.close ?? [],
+    meta
+  )
   const changePct =
     price !== null && previousClose !== null && previousClose !== 0
       ? Number((((price - previousClose) / previousClose) * 100).toFixed(2))

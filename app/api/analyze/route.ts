@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, isSupabaseConfigured } from '@/lib/supabase/server'
 import { classifyEvent, generateCounterArgument } from '@/lib/ai/eventClassifier'
+import { buildCounterArgumentFromRules, classifyEventByRules } from '@/lib/ai/ruleClassifier'
 import {
   getMockFundamentals,
   getMockValuation,
@@ -12,7 +13,7 @@ import {
   getHistoricalReaction,
   historicalReturnToScore,
 } from '@/lib/market/historicalEngine'
-import { stocksForSectors, type UniverseStock } from '@/lib/market/stockUniverse'
+import { dedupeByCompany, stocksForSectors, type UniverseStock } from '@/lib/market/stockUniverse'
 import {
   calculateCompositeScore,
   calculateFundamentalScore,
@@ -32,29 +33,38 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Event text is required' }, { status: 400 })
     }
 
-    const supabase = createClient()
-
     // Whether we can persist is a separate question from whether we can
     // analyse. Nothing in the analysis below needs a database: classification
     // is deterministic and the per-stock metrics are seeded by symbol. So a
     // signed-out visitor, or a paused Supabase project, gets the full result
     // anyway — it just isn't saved.
+    const supabase = isSupabaseConfigured ? createClient() : null
+
     let user = null
-    try {
-      const { data } = await supabase.auth.getUser()
-      user = data.user
-    } catch {
-      // Supabase unreachable — treated the same as signed out.
+    if (supabase) {
+      try {
+        const { data } = await supabase.auth.getUser()
+        user = data.user
+      } catch {
+        // Supabase unreachable — treated the same as signed out.
+      }
     }
 
-    // ── STEP 1: AI Event Classification ────────────────────────────────
-    // classifyEvent falls back to the offline rule engine on any AI failure,
-    // so this cannot fail on a missing or unfunded API key.
-    const classification = await classifyEvent(event)
+    // ── STEP 1: Event Classification ───────────────────────────────────
+    // Only a signed-in request may spend model tokens. This endpoint is
+    // reachable without a session so that the app keeps working when the
+    // database is down, and an anonymous, unthrottled route that makes two
+    // Claude calls per request is exactly the credit-exhaustion problem this
+    // whole rebuild exists to remove. Anonymous requests get the rule engine,
+    // which is what an unfunded key would have produced anyway.
+    const classification = user
+      ? await classifyEvent(event)
+      : classifyEventByRules(event)
 
     let eventData: { id: string } | null = null
-    if (user) {
-      const { data } = await supabase
+    let eventInsertError: string | null = null
+    if (user && supabase) {
+      const { data, error } = await supabase
         .from('events')
         .insert({
           user_id: user.id,
@@ -70,8 +80,9 @@ export async function POST(request: NextRequest) {
         .select()
         .single()
       // A failed insert is no longer fatal — it costs persistence, not the
-      // analysis.
+      // analysis — but it must not be reported as "ran without a database".
       eventData = data
+      if (error) eventInsertError = error.message
     }
 
     // ── STEP 2: Historical Event Engine (deterministic, no AI numbers) ──
@@ -80,7 +91,7 @@ export async function POST(request: NextRequest) {
     // database. Without it the engine already has a defined behaviour: a
     // neutral 50, stated as "limited data" rather than invented.
     let historical = null
-    if (user) {
+    if (user && supabase) {
       try {
         historical = await getHistoricalReaction(
           supabase,
@@ -104,13 +115,13 @@ export async function POST(request: NextRequest) {
     // unreachable database narrows what can be saved, not what can be scored.
     const sectors = classification.affected_sectors ?? []
     let affectedStocks: (UniverseStock & { id?: string })[] = []
-    if (user) {
+    if (user && supabase) {
       try {
         let stocksQuery = supabase.from('stocks').select('*')
         if (sectors.length > 0) stocksQuery = stocksQuery.in('sector', sectors)
         const { data } = await stocksQuery.limit(MAX_STOCKS_ANALYZED)
         if (data && data.length > 0) {
-          affectedStocks = data.map((row: any) => ({
+          affectedStocks = dedupeByCompany(data).map((row: any) => ({
             id: row.id,
             symbol: row.symbol,
             name: row.name,
@@ -202,7 +213,7 @@ export async function POST(request: NextRequest) {
         ? `In ${historical.matchCount} similar historical events, ${primarySector} sector averaged ${historical.avgSectorReturn.d5}% return over 5 days and NIFTY averaged ${historical.avgNiftyReturn.d5}%.`
         : undefined
 
-      counterArgument = await generateCounterArgument({
+      const decisionInput = {
         eventReasoning: classification.reasoning,
         transmissionExplanation: classification.transmission_explanation,
         eventDirection: classification.direction,
@@ -214,14 +225,17 @@ export async function POST(request: NextRequest) {
         technicalScore: topStock.technicalScore,
         riskScore: topStock.riskScoreValue,
         historicalSummary,
-      })
+      }
+      counterArgument = user
+        ? await generateCounterArgument(decisionInput)
+        : buildCounterArgumentFromRules(decisionInput)
     }
 
     // ── STEP 6: Persist, when there is somewhere to persist to ──────────
     let analysisId: string | null = null
-    let persistError: string | null = null
+    let persistError: string | null = eventInsertError
 
-    if (user && eventData) {
+    if (user && supabase && eventData) {
       const { data: analysisData, error: analysisError } = await supabase
         .from('event_analysis')
         .insert({

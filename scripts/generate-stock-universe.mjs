@@ -13,14 +13,36 @@ import { readFileSync, writeFileSync } from 'node:fs'
 const sql = readFileSync('database/seed.sql', 'utf8')
 const ROW = /\('([A-Z0-9&]+)',\s*'([^']+)',\s*'([A-Za-z]+)',\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)\)/g
 
+// seed.sql predates this module being user-visible and carries three kinds of
+// junk that only mattered once these rows started being rendered and linked to
+// /stocks/[symbol], where a bad ticker is a 404 at Yahoo.
+
+// Not NSE-listed. The US names are in an Indian-equity universe by accident;
+// the other two are not real tickers for the companies they name.
+const EXCLUDED = new Set(['MSFT', 'GOOGLE', 'APPLE', 'AMMWALE', 'AVENDIRAA'])
+
+// Real NSE symbols for companies the seed spelled loosely. Applied before
+// dedupe so the canonical symbol is the one that survives.
+const SYMBOL_FIXES = {
+  HDFC: 'HDFCBANK',
+  SBI: 'SBIN',
+  STATEBANK: 'SBIN',
+  AXIS: 'AXISBANK',
+  TATA: 'TATAMOTORS',
+}
+
 const bySymbol = new Map()
-for (const [, symbol, name, sector, pe, pb, dy] of sql.matchAll(ROW)) {
-  // seed.sql contains genuine duplicates (SBI/STATEBANK/SBIN for the same
-  // bank, and BAJAJFINSV reused for three different companies). First
-  // spelling wins, matching what a UNIQUE(symbol) insert would keep.
-  if (!bySymbol.has(symbol)) {
-    bySymbol.set(symbol, { symbol, name, sector, pe, pb, dy })
-  }
+const byCompany = new Map()
+for (const [, rawSymbol, name, sector, pe, pb, dy] of sql.matchAll(ROW)) {
+  if (EXCLUDED.has(rawSymbol)) continue
+  const symbol = SYMBOL_FIXES[rawSymbol] ?? rawSymbol
+  // Two levels of dedupe: by symbol, matching what a UNIQUE(symbol) insert
+  // would keep, and by company, because the seed lists State Bank of India
+  // three times and Avenue Supermarts twice under different tickers — which
+  // would otherwise score the same company twice in one analysis.
+  if (bySymbol.has(symbol) || byCompany.has(name)) continue
+  bySymbol.set(symbol, { symbol, name, sector, pe, pb, dy })
+  byCompany.set(name, symbol)
 }
 
 const rows = [...bySymbol.values()]

@@ -89,9 +89,13 @@ export async function POST(request: NextRequest) {
       else inserted++
     }
 
-    // Every fresh article failing to insert means a schema/permission problem,
-    // not unlucky articles — surface it rather than reporting "0 new items".
-    if (fresh.length > 0 && insertErrors.length === fresh.length - skippedIrrelevant && inserted === 0) {
+    // Every article that was *attempted* failing to insert means a schema or
+    // permission problem, not unlucky articles — surface it rather than
+    // reporting "0 new items". Articles filtered as not market-relevant were
+    // never attempted, so a batch where everything was filtered is a normal
+    // success, not a failure: without the `insertErrors.length > 0` guard
+    // that case compared 0 === 0 and returned a 502 citing an undefined error.
+    if (insertErrors.length > 0 && inserted === 0) {
       return NextResponse.json(
         { error: `Could not store any article: ${insertErrors[0]}` },
         { status: 502 }

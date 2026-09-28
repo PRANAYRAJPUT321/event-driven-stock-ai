@@ -205,17 +205,36 @@ export default function Discover() {
         </div>
       ) : filtered.length === 0 ? (
         <div className="panel p-10 text-center text-ink-muted">
-          <p className="text-lg mb-2 text-ink">No news cached yet</p>
-          <p className="text-sm mb-6">
-            Tap <strong className="text-ink">Refresh News</strong> above to fetch and categorize the latest financial headlines.
+          {/* The empty state must offer the same action the header does.
+              Offering "Refresh News" without a session posts to a route that
+              answers Unauthorized, which reads as a broken button. */}
+          <p className="text-lg mb-2 text-ink">
+            {filter !== 'All' ? `No headlines tagged ${filter} right now` : 'No headlines right now'}
           </p>
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold px-6 py-2 rounded-lg transition"
-          >
-            {refreshing ? 'Fetching…' : 'Refresh News'}
-          </button>
+          <p className="text-sm mb-6">
+            {filter !== 'All'
+              ? 'Try the All filter, or reload for a fresh pull.'
+              : live
+                ? 'The news feed returned nothing on the last pull. It refreshes on every load.'
+                : 'Tap Refresh News to fetch and categorize the latest financial headlines.'}
+          </p>
+          {user && !backendDown && !live ? (
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold px-6 py-2 rounded-lg transition"
+            >
+              {refreshing ? 'Fetching…' : 'Refresh News'}
+            </button>
+          ) : (
+            <button
+              onClick={() => loadNews()}
+              disabled={loading}
+              className="bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold px-6 py-2 rounded-lg transition"
+            >
+              {loading ? 'Loading…' : 'Reload headlines'}
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-3">
