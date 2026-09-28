@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient, getSessionUser } from '@/lib/supabase/client'
-import BackendDownNotice from '@/components/BackendDownNotice'
 import AppShell from '@/components/layout/AppShell'
 import type { User } from '@supabase/supabase-js'
 
@@ -31,6 +30,9 @@ export default function Discover() {
   const [refreshing, setRefreshing] = useState(false)
   const [refreshMsg, setRefreshMsg] = useState('')
   const [filter, setFilter] = useState('All')
+  // True when the list came from RSS rather than the stored feed.
+  const [live, setLive] = useState(false)
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
     loadNews()
@@ -39,24 +41,43 @@ export default function Discover() {
   async function loadNews() {
     setLoading(true)
     const { user, backendDown: down } = await getSessionUser()
-    if (down) {
-      setBackendDown(true)
-      setLoading(false)
-      return
-    }
-    if (!user) {
-      router.push('/auth/login')
-      return
-    }
+    setBackendDown(down)
     setUser(user)
 
-    const { data } = await supabase
-      .from('news_feeds')
-      .select('*')
-      .order('published_at', { ascending: false })
-      .limit(30)
+    // With a session and a reachable database, show the stored feed — those
+    // rows are AI-categorised and accumulate over time.
+    if (user && !down) {
+      const { data } = await supabase
+        .from('news_feeds')
+        .select('*')
+        .order('published_at', { ascending: false })
+        .limit(30)
 
-    setNews(data || [])
+      if (data && data.length > 0) {
+        setNews(data)
+        setLive(false)
+        setLoading(false)
+        return
+      }
+    }
+
+    // Otherwise read the same headlines straight from RSS, categorised by the
+    // rule engine and never stored. Discover stays usable signed out and
+    // while the database is asleep; it just isn't building a stored feed.
+    // Set before the fetch, not after: reaching this point already means the
+    // page is in live mode, and a failed fetch would otherwise leave the
+    // header claiming a stored, AI-categorised feed that isn't there.
+    setLive(true)
+    try {
+      const response = await fetch('/api/news/live')
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Could not load headlines')
+      setNews(data.items || [])
+      setLoadError('')
+    } catch (err: any) {
+      setNews([])
+      setLoadError(err?.message || 'Could not load headlines')
+    }
     setLoading(false)
   }
 
@@ -90,6 +111,12 @@ export default function Discover() {
   }
 
   function analyzeNews(item: NewsItem) {
+    if (live) {
+      // No stored row to look up — hand the headline straight to Analyze.
+      const text = `${item.title}${item.description ? '\n\n' + item.description : ''}`
+      router.push(`/analyze?event=${encodeURIComponent(text)}`)
+      return
+    }
     router.push(`/analyze?news_id=${item.id}`)
   }
 
@@ -100,32 +127,53 @@ export default function Discover() {
 
   const filtered = filter === 'All' ? news : news.filter((n) => n.detected_sectors?.includes(filter))
 
-  // Supabase unreachable: this page's content lives in Postgres, so
-  // there is nothing to show and nowhere useful to redirect to.
-  if (backendDown) {
-    return (
-      <AppShell showTicker={false}>
-        <BackendDownNotice feature="News discovery" />
-      </AppShell>
-    )
-  }
-
   return (
     <AppShell userEmail={user?.email} onLogout={handleLogout}>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 fade-in">
         <div>
           <p className="text-xs font-mono uppercase tracking-widest text-accent-bright mb-2">Live feed</p>
           <h1 className="text-2xl sm:text-3xl font-bold text-ink mb-1">Market News &amp; Events</h1>
-          <p className="text-ink-muted text-sm">Auto-categorized by AI. Pick one and trace its market impact.</p>
+          <p className="text-ink-muted text-sm">
+            {live
+              ? 'Straight from the wire, categorised on the fly. Pick one and trace its market impact.'
+              : 'Auto-categorized by AI. Pick one and trace its market impact.'}
+          </p>
         </div>
-        <button
-          onClick={handleRefresh}
-          disabled={refreshing}
-          className="flex-shrink-0 bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold px-4 py-2.5 rounded-lg text-sm transition"
-        >
-          {refreshing ? 'Fetching…' : '↻ Refresh News'}
-        </button>
+        {/* Refreshing means "fetch and store", which needs both a session and
+            a database. Without them the list is already live on every load,
+            so the button would promise something it cannot do. */}
+        {user && !backendDown ? (
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="flex-shrink-0 bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold px-4 py-2.5 rounded-lg text-sm transition"
+          >
+            {refreshing ? 'Fetching…' : '↻ Refresh News'}
+          </button>
+        ) : (
+          <button
+            onClick={() => loadNews()}
+            disabled={loading}
+            className="flex-shrink-0 border border-border text-ink-muted hover:text-accent hover:border-accent-dim disabled:opacity-50 px-4 py-2.5 rounded-lg text-sm transition"
+          >
+            {loading ? 'Loading…' : '↻ Reload headlines'}
+          </button>
+        )}
       </div>
+
+      {live && (
+        <p className="text-sm text-hold bg-hold-dim border border-hold-dim rounded-lg px-3 py-2 mb-4">
+          {backendDown
+            ? 'Reading headlines directly from the news feed because the database is unreachable. They are categorised by the offline rule engine and not saved.'
+            : 'Reading headlines directly from the news feed. Sign in to build up a stored, AI-categorised feed.'}
+        </p>
+      )}
+
+      {loadError && (
+        <p className="text-sm text-avoid bg-avoid-dim border border-avoid-dim rounded-lg px-3 py-2 mb-4">
+          {loadError}
+        </p>
+      )}
 
       {refreshMsg && (
         <p className="text-sm text-accent-bright bg-accent-dim/40 border border-accent-dim rounded-lg px-3 py-2 mb-6">

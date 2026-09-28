@@ -37,6 +37,9 @@ function AnalyzeForm() {
   const [backendDown, setBackendDown] = useState(false)
   const searchParams = useSearchParams()
   const newsId = searchParams.get('news_id')
+  // Discover passes the headline itself when it is showing live, unstored
+  // items that have no database row to look up.
+  const presetEvent = searchParams.get('event')
   const supabase = createClient()
 
   useEffect(() => {
@@ -52,6 +55,10 @@ function AnalyzeForm() {
   }, [])
 
   useEffect(() => {
+    if (presetEvent) {
+      setEventText(presetEvent)
+      return
+    }
     if (!newsId) return
     const loadNews = async () => {
       const { data } = await supabase.from('news_feeds').select('*').eq('id', newsId).single()
@@ -61,7 +68,7 @@ function AnalyzeForm() {
       }
     }
     loadNews()
-  }, [newsId])
+  }, [newsId, presetEvent])
 
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault()
