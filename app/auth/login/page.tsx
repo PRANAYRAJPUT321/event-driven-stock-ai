@@ -1,7 +1,7 @@
 'use client'
 
 import { Suspense, useState } from 'react'
-import { createClient, describeAuthError, isSupabaseConfigured } from '@/lib/supabase/client'
+import { createClient, describeAuthError, isSupabaseConfigured, isUnreachable } from '@/lib/supabase/client'
 import ThemeToggle from '@/components/ui/ThemeToggle'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
@@ -11,6 +11,9 @@ function LoginForm() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  // Distinguishes "we cannot reach the service" from "wrong password": only
+  // the former means signing in is impossible rather than merely failed.
+  const [backendUnreachable, setBackendUnreachable] = useState(false)
   const router = useRouter()
   const searchParams = useSearchParams()
   const message = searchParams.get('message')
@@ -19,17 +22,20 @@ function LoginForm() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    setBackendUnreachable(false)
     setLoading(true)
 
     try {
       const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
       if (authError) {
         setError(describeAuthError(authError))
+        setBackendUnreachable(isUnreachable(authError))
         return
       }
       router.push('/dashboard')
     } catch (err: any) {
       setError(describeAuthError(err))
+      setBackendUnreachable(isUnreachable(err))
     } finally {
       setLoading(false)
     }
@@ -68,7 +74,15 @@ function LoginForm() {
           )}
           {error && (
             <div className="bg-avoid-dim border border-avoid-dim text-avoid px-4 py-3 rounded-lg mb-5 text-sm">
-              {error}
+              <p>{error}</p>
+              {backendUnreachable && (
+                <Link
+                  href="/markets"
+                  className="mt-3 block text-center bg-accent hover:bg-accent-bright text-on-accent font-semibold py-2 px-4 rounded-lg transition"
+                >
+                  Continue without signing in →
+                </Link>
+              )}
             </div>
           )}
 

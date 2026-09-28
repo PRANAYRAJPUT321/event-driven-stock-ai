@@ -47,6 +47,17 @@ export function createClient() {
  * three states have completely different fixes, so they get different
  * messages.
  */
+/**
+ * True when the failure means Supabase could not be reached at all, rather
+ * than reached and refused. Only the first makes signing in impossible, so
+ * only the first justifies offering a way past the login page.
+ */
+export function isUnreachable(error: unknown): boolean {
+  if (!isSupabaseConfigured) return true
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return /failed to fetch|networkerror|load failed|fetch failed/i.test(message)
+}
+
 export function describeAuthError(error: unknown): string {
   if (!isSupabaseConfigured) {
     return (
