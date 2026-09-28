@@ -67,6 +67,21 @@ Unlike generic stock recommendation systems, this platform is **event-driven** -
 No other keys are needed: market, crypto and news data all come from keyless
 public feeds.
 
+### What works without a database
+
+Supabase stores accounts and everything user-owned — saved analyses,
+watchlists, portfolio positions. The rest of the app does not depend on it:
+
+| Works with no database | Needs Supabase |
+|---|---|
+| Live market bar and `/markets` heatmap | Sign-in and accounts |
+| `/stocks/[symbol]` price, chart, statistics, fundamentals | Saving an analysis to history |
+| `/analyze` — classification, scoring and the bull/bear narrative | Watchlist and paper portfolio |
+| Live news impact per sector and company | `/discover` news feed |
+
+An analysis run without a database returns the full result and says it was
+not saved. `/api/health` reports what this deployment can actually reach.
+
 ### Installation
 
 ```bash

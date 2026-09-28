@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import { fetchCompanyNews, fetchSectorNews, type RssNewsItem } from '@/lib/news/rssNews'
 
 export const dynamic = 'force-dynamic'
@@ -37,12 +36,10 @@ export interface ImpactGroup {
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createClient()
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
+    // Deliberately unauthenticated. This returns public RSS headlines and no
+    // user data, and requiring a session meant a paused Supabase project took
+    // the panel down with it — including on an analysis that ran fine without
+    // a database. The caps below bound the work a single request can cause.
     const body = await request.json().catch(() => ({}))
 
     const sectors: string[] = Array.isArray(body?.sectors)

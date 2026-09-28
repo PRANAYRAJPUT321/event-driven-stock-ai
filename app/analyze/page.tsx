@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient, getSessionUser } from '@/lib/supabase/client'
-import BackendDownNotice from '@/components/BackendDownNotice'
+import AnalysisResult, { type AnalysisPayload } from '@/components/AnalysisResult'
 import AppShell from '@/components/layout/AppShell'
 import type { User } from '@supabase/supabase-js'
 
@@ -28,6 +28,10 @@ function AnalyzeForm() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [newsSource, setNewsSource] = useState<NewsSource | null>(null)
+  // Set when an analysis completed but could not be stored — the result is
+  // rendered in place instead of redirecting to a saved page that does not
+  // exist.
+  const [unsavedResult, setUnsavedResult] = useState<AnalysisPayload | null>(null)
   const [user, setUser] = useState<User | null>(null)
   const router = useRouter()
   const [backendDown, setBackendDown] = useState(false)
@@ -37,15 +41,11 @@ function AnalyzeForm() {
 
   useEffect(() => {
     const init = async () => {
+      // No guard here: the analysis engine is deterministic and needs no
+      // database, so this page works signed out and while Supabase is down.
+      // The session only decides whether the result can be saved.
       const { user: sessionUser, backendDown: down } = await getSessionUser()
-      if (down) {
-        setBackendDown(true)
-        return
-      }
-      if (!sessionUser) {
-        router.push('/auth/login')
-        return
-      }
+      setBackendDown(down)
       setUser(sessionUser)
     }
     init()
@@ -82,7 +82,12 @@ function AnalyzeForm() {
 
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Analysis failed')
-      router.push(`/events/${data.analysisId}`)
+      if (data.persisted && data.analysisId) {
+        router.push(`/events/${data.analysisId}`)
+        return
+      }
+      // No database to save to — show the result rather than discarding it.
+      setUnsavedResult(data.result)
     } catch (err: any) {
       setError(err.message || 'An error occurred')
     } finally {
@@ -95,12 +100,18 @@ function AnalyzeForm() {
     router.push('/auth/login')
   }
 
-  // Supabase unreachable: this page's content lives in Postgres, so
-  // there is nothing to show and nowhere useful to redirect to.
-  if (backendDown) {
+  if (unsavedResult) {
     return (
-      <AppShell showTicker={false}>
-        <BackendDownNotice feature="Event analysis" />
+      <AppShell userEmail={user?.email} onLogout={handleLogout} showTicker={false}>
+        <div className="max-w-4xl mx-auto">
+          <button
+            onClick={() => setUnsavedResult(null)}
+            className="text-xs text-ink-muted hover:text-accent mb-4 transition"
+          >
+            ← Analyze another event
+          </button>
+          <AnalysisResult payload={unsavedResult} />
+        </div>
       </AppShell>
     )
   }
@@ -113,6 +124,14 @@ function AnalyzeForm() {
         <p className="text-ink-muted mb-8 text-sm">
           Every recommendation this platform produces is tied to a specific event — never a generic stock call.
         </p>
+
+        {(backendDown || !user) && (
+          <div className="bg-hold-dim border border-hold-dim text-hold px-4 py-3 rounded-lg mb-6 text-sm">
+            {backendDown
+              ? 'The database is unreachable, so this analysis will run but will not be saved to your history.'
+              : 'You are not signed in, so this analysis will run but will not be saved to your history.'}
+          </div>
+        )}
 
         <div className="panel-elevated p-7 shadow-panel">
           {newsSource && (

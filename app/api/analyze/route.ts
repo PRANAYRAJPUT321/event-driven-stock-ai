@@ -12,6 +12,7 @@ import {
   getHistoricalReaction,
   historicalReturnToScore,
 } from '@/lib/market/historicalEngine'
+import { stocksForSectors, type UniverseStock } from '@/lib/market/stockUniverse'
 import {
   calculateCompositeScore,
   calculateFundamentalScore,
@@ -32,56 +33,100 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = createClient()
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
 
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // Whether we can persist is a separate question from whether we can
+    // analyse. Nothing in the analysis below needs a database: classification
+    // is deterministic and the per-stock metrics are seeded by symbol. So a
+    // signed-out visitor, or a paused Supabase project, gets the full result
+    // anyway — it just isn't saved.
+    let user = null
+    try {
+      const { data } = await supabase.auth.getUser()
+      user = data.user
+    } catch {
+      // Supabase unreachable — treated the same as signed out.
     }
 
     // ── STEP 1: AI Event Classification ────────────────────────────────
+    // classifyEvent falls back to the offline rule engine on any AI failure,
+    // so this cannot fail on a missing or unfunded API key.
     const classification = await classifyEvent(event)
 
-    const { data: eventData, error: eventError } = await supabase
-      .from('events')
-      .insert({
-        user_id: user.id,
-        title: event.substring(0, 200),
-        description: event,
-        event_type: classification.event_type,
-        economic_variable: classification.economic_variable,
-        direction: classification.direction,
-        magnitude: classification.magnitude,
-        confidence: classification.confidence,
-        transmission_explanation: classification.transmission_explanation,
-      })
-      .select()
-      .single()
-
-    if (eventError || !eventData) {
-      return NextResponse.json({ error: 'Failed to save event' }, { status: 500 })
+    let eventData: { id: string } | null = null
+    if (user) {
+      const { data } = await supabase
+        .from('events')
+        .insert({
+          user_id: user.id,
+          title: event.substring(0, 200),
+          description: event,
+          event_type: classification.event_type,
+          economic_variable: classification.economic_variable,
+          direction: classification.direction,
+          magnitude: classification.magnitude,
+          confidence: classification.confidence,
+          transmission_explanation: classification.transmission_explanation,
+        })
+        .select()
+        .single()
+      // A failed insert is no longer fatal — it costs persistence, not the
+      // analysis.
+      eventData = data
     }
 
     // ── STEP 2: Historical Event Engine (deterministic, no AI numbers) ──
     const primarySector = classification.affected_sectors?.[0]
-    const historical = await getHistoricalReaction(
-      supabase,
-      classification.event_type,
-      classification.economic_variable,
-      classification.direction,
-      primarySector
-    )
+    // Historical evidence is the one part that genuinely requires the
+    // database. Without it the engine already has a defined behaviour: a
+    // neutral 50, stated as "limited data" rather than invented.
+    let historical = null
+    if (user) {
+      try {
+        historical = await getHistoricalReaction(
+          supabase,
+          classification.event_type,
+          classification.economic_variable,
+          classification.direction,
+          primarySector
+        )
+      } catch {
+        historical = null
+      }
+    }
 
     const historicalReactionScore = historical
       ? historicalReturnToScore(historical.avgSectorReturn.d5, classification.direction as any)
       : 50 // neutral fallback when no historical match exists
 
-    // ── STEP 3: Affected Stocks (from seeded stock universe) ───────────
-    let stocksQuery = supabase.from('stocks').select('*')
-    if (classification.affected_sectors && classification.affected_sectors.length > 0) {
-      stocksQuery = stocksQuery.in('sector', classification.affected_sectors)
+    // ── STEP 3: Affected Stocks ─────────────────────────────────────────
+    // The `stocks` table is the source of truth when reachable; the generated
+    // universe in lib/market/stockUniverse.ts is the same data as code, so an
+    // unreachable database narrows what can be saved, not what can be scored.
+    const sectors = classification.affected_sectors ?? []
+    let affectedStocks: (UniverseStock & { id?: string })[] = []
+    if (user) {
+      try {
+        let stocksQuery = supabase.from('stocks').select('*')
+        if (sectors.length > 0) stocksQuery = stocksQuery.in('sector', sectors)
+        const { data } = await stocksQuery.limit(MAX_STOCKS_ANALYZED)
+        if (data && data.length > 0) {
+          affectedStocks = data.map((row: any) => ({
+            id: row.id,
+            symbol: row.symbol,
+            name: row.name,
+            sector: row.sector,
+            peRatio: row.pe_ratio,
+            pbRatio: row.pb_ratio,
+            dividendYield: row.dividend_yield,
+          }))
+        }
+      } catch {
+        // Fall through to the built-in universe.
+      }
     }
-    const { data: candidateStocks } = await stocksQuery.limit(MAX_STOCKS_ANALYZED)
-    const affectedStocks = candidateStocks && candidateStocks.length > 0 ? candidateStocks : []
+    if (affectedStocks.length === 0) {
+      affectedStocks = stocksForSectors(sectors, MAX_STOCKS_ANALYZED)
+    }
 
     // ── STEP 4: Deterministic Multi-Factor Scoring per stock ────────────
     const eventImpactScore = classification.direction === 'NEGATIVE'
@@ -90,7 +135,7 @@ export async function POST(request: NextRequest) {
         ? 50 + classification.magnitude / 2
         : 50
 
-    const stockResults = affectedStocks.map((stock: any) => {
+    const stockResults = affectedStocks.map((stock) => {
       const fundamentals = getMockFundamentals(stock.symbol)
       const valuation = getMockValuation(stock.symbol, stock.sector)
       const technical = getMockTechnical(stock.symbol)
@@ -172,56 +217,91 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // ── STEP 6: Persist event_analysis (parent record) ──────────────────
-    const { data: analysisData, error: analysisError } = await supabase
-      .from('event_analysis')
-      .insert({
-        user_id: user.id,
-        event_id: eventData.id,
-        event_title: event.substring(0, 200),
-        affected_sectors: classification.affected_sectors,
-        opportunity_score: topStock?.compositeScore ?? classification.magnitude,
-        composite_score: topStock?.compositeScore ?? null,
-        recommendation: topStock?.recommendation ?? null,
-        bull_case: counterArgument?.bullCase ?? null,
-        bear_case: counterArgument?.bearCase ?? null,
-        contradictory_evidence: counterArgument?.contradictoryEvidence ?? null,
-        risks: counterArgument?.keyRisks ?? [],
-        historical_summary: historical,
-        analysis_json: classification,
-      })
-      .select()
-      .single()
+    // ── STEP 6: Persist, when there is somewhere to persist to ──────────
+    let analysisId: string | null = null
+    let persistError: string | null = null
 
-    if (analysisError || !analysisData) {
-      return NextResponse.json({ error: 'Failed to create analysis' }, { status: 500 })
+    if (user && eventData) {
+      const { data: analysisData, error: analysisError } = await supabase
+        .from('event_analysis')
+        .insert({
+          user_id: user.id,
+          event_id: eventData.id,
+          event_title: event.substring(0, 200),
+          affected_sectors: classification.affected_sectors,
+          opportunity_score: topStock?.compositeScore ?? classification.magnitude,
+          composite_score: topStock?.compositeScore ?? null,
+          recommendation: topStock?.recommendation ?? null,
+          bull_case: counterArgument?.bullCase ?? null,
+          bear_case: counterArgument?.bearCase ?? null,
+          contradictory_evidence: counterArgument?.contradictoryEvidence ?? null,
+          risks: counterArgument?.keyRisks ?? [],
+          historical_summary: historical,
+          analysis_json: classification,
+        })
+        .select()
+        .single()
+
+      if (analysisError || !analysisData) {
+        persistError = analysisError?.message || 'Could not save this analysis'
+      } else {
+        analysisId = analysisData.id
+
+        // ── STEP 7: Persist per-stock scores ─────────────────────────────
+        // Only stocks that came from the database have an id to key on; the
+        // built-in universe has none, which is another reason this step is
+        // skipped entirely when the database is not in play.
+        const scoreRows = stockResults
+          .filter((r) => r.stock.id)
+          .map((r) => ({
+            event_analysis_id: analysisData.id,
+            stock_id: r.stock.id,
+            stock_symbol: r.stock.symbol,
+            event_impact_score: eventImpactScore,
+            event_impact_direction: classification.direction,
+            fundamental_score: r.fundamentalScore,
+            valuation_score: r.valuationScore,
+            technical_score: r.technicalScore,
+            risk_score: r.riskScoreValue,
+            risk_level: riskScoreToLevel(r.riskScoreValue),
+            opportunity_score: r.compositeScore,
+            recommendation: r.recommendation,
+            confidence: classification.confidence,
+          }))
+
+        if (scoreRows.length > 0) {
+          await supabase.from('stock_scores').insert(scoreRows)
+        }
+      }
     }
 
-    // ── STEP 7: Persist per-stock scores ─────────────────────────────────
-    if (stockResults.length > 0) {
-      const scoreRows = stockResults.map((r) => ({
-        event_analysis_id: analysisData.id,
-        stock_id: r.stock.id,
-        stock_symbol: r.stock.symbol,
-        event_impact_score: eventImpactScore,
-        event_impact_direction: classification.direction,
-        fundamental_score: r.fundamentalScore,
-        valuation_score: r.valuationScore,
-        technical_score: r.technicalScore,
-        risk_score: r.riskScoreValue,
-        risk_level: riskScoreToLevel(r.riskScoreValue),
-        opportunity_score: r.compositeScore,
-        recommendation: r.recommendation,
-        confidence: classification.confidence,
-      }))
-
-      await supabase.from('stock_scores').insert(scoreRows)
-    }
-
+    // The full result is returned either way. With an analysisId the client
+    // redirects to the saved page; without one it renders this payload
+    // directly, so an unreachable database costs history, not the answer.
     return NextResponse.json({
       success: true,
-      analysisId: analysisData.id,
-      classification,
+      analysisId,
+      persisted: analysisId !== null,
+      persistError,
+      result: {
+        eventTitle: event.substring(0, 200),
+        classification,
+        historical,
+        counterArgument,
+        eventImpactScore,
+        stocks: stockResults.map((r) => ({
+          symbol: r.stock.symbol,
+          name: r.stock.name,
+          sector: r.stock.sector,
+          fundamentalScore: r.fundamentalScore,
+          valuationScore: r.valuationScore,
+          technicalScore: r.technicalScore,
+          riskScore: r.riskScoreValue,
+          riskLevel: riskScoreToLevel(r.riskScoreValue),
+          opportunityScore: r.compositeScore,
+          recommendation: r.recommendation,
+        })),
+      },
       topStock: topStock?.stock.symbol,
       stockCount: stockResults.length,
     })
