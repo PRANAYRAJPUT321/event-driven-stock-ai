@@ -30,7 +30,7 @@ type Sector =
   | 'Metals' | 'Telecom' | 'Utilities' | 'Engineering' | 'Cement' | 'Chemicals'
   | 'Consumer' | 'Retail' | 'Diversified' | 'Aviation' | 'Ports'
 
-type Polarity = 'up' | 'down' | 'neutral'
+export type Polarity = 'up' | 'down' | 'neutral'
 
 interface Theme {
   id: string
@@ -445,7 +445,7 @@ function firstMatchIndex(haystack: string, needles: string[]): number {
   return earliest
 }
 
-function detectPolarity(text: string): Polarity {
+export function detectPolarity(text: string): Polarity {
   // "Held unchanged" beats any incidental up/down word in the same sentence.
   if (countMatches(text, HOLD_WORDS) > 0 && countMatches(text, ['hike', 'cut', 'raise']) === 0) {
     return 'neutral'

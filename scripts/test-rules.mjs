@@ -10,9 +10,15 @@
  */
 import { execSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 
-const MODULES = ['lib/ai/ruleClassifier.ts', 'lib/news/rssNews.ts', 'lib/market/yahooFinance.ts']
+const MODULES = [
+  'lib/ai/ruleClassifier.ts',
+  'lib/ai/impactAnalyzer.ts',
+  'lib/news/rssNews.ts',
+  'lib/market/yahooFinance.ts',
+]
 
 // Emitted inside the project so Node resolves the project's node_modules.
 const out = mkdtempSync(path.join(process.cwd(), '.tsbuild-'))
@@ -21,7 +27,7 @@ process.on('exit', () => rmSync(out, { recursive: true, force: true }))
 try {
   execSync(
     `./node_modules/.bin/tsc ${MODULES.join(' ')} ` +
-      `--target es2022 --module es2022 --moduleResolution bundler --skipLibCheck --outDir ${out}`,
+      `--target es2022 --module commonjs --moduleResolution node --skipLibCheck --outDir ${out}`,
     { stdio: 'pipe' }
   )
 } catch (err) {
@@ -34,10 +40,12 @@ try {
   }
 }
 
+const require = createRequire(import.meta.url)
 const { classifyEventByRules, categorizeNewsByRules, buildCounterArgumentFromRules } =
-  await import(path.join(out, 'ai/ruleClassifier.js'))
-const { parseRssFeed } = await import(path.join(out, 'news/rssNews.js'))
-const { parseChart } = await import(path.join(out, 'market/yahooFinance.js'))
+  require(path.join(out, 'ai/ruleClassifier.js'))
+const { parseRssFeed } = require(path.join(out, 'news/rssNews.js'))
+const { parseChart } = require(path.join(out, 'market/yahooFinance.js'))
+const { analyseImpact } = require(path.join(out, 'ai/impactAnalyzer.js'))
 
 let failures = 0
 let checks = 0
@@ -243,6 +251,78 @@ check('meta is the fallback when the series is unusable', thin.previousClose, 49
 check('yahoo error payload yields null', parseChart({ chart: { result: null, error: { code: 'Not Found' } } }, T), null)
 check('empty body yields null', parseChart({}, T), null)
 check('response without a price yields null', parseChart({ chart: { result: [{ meta: { currency: 'USD' } }] } }, T), null)
+
+// ─────────────────── two-sided impact analysis ───────────────────
+section('analyseImpact — winners and losers from the same event')
+
+const crudeUpImpact = analyseImpact({
+  title: 'Brent crude surges past $95 a barrel after OPEC output cut',
+  sectors: ['Aviation', 'Energy'],
+})
+const aviationUp = crudeUpImpact.sectorImpacts.find((s) => s.entity === 'Aviation')
+const energyUp = crudeUpImpact.sectorImpacts.find((s) => s.entity === 'Energy')
+
+// The regression this pins: the impact table is keyed by which way the
+// VARIABLE moved, but classification.direction is the MARKET's reaction, and
+// for crude those are opposite. Deriving polarity from the market direction
+// selected the cheaper-crude points for a crude spike — an exactly inverted
+// answer that still looked plausible.
+check('crude spike hurts airlines', aviationUp.direction, 'NEGATIVE')
+checkThat('crude spike names fuel cost as the mechanism',
+  aviationUp.negatives.some((t) => /fuel/i.test(t)), JSON.stringify(aviationUp.negatives))
+check('crude spike is two-sided for energy', energyUp.direction, 'MIXED')
+checkThat('crude spike helps upstream producers',
+  energyUp.positives.some((t) => /upstream|higher price/i.test(t)), JSON.stringify(energyUp.positives))
+
+const crudeDownImpact = analyseImpact({
+  title: 'Crude oil prices fall sharply to $68 on weak demand',
+  sectors: ['Aviation', 'Energy'],
+})
+check('cheaper crude helps airlines',
+  crudeDownImpact.sectorImpacts.find((s) => s.entity === 'Aviation').direction, 'POSITIVE')
+check('cheaper crude hurts producers',
+  crudeDownImpact.sectorImpacts.find((s) => s.entity === 'Energy').direction, 'NEGATIVE')
+
+const hike = analyseImpact({
+  title: 'RBI hikes repo rate by 25 bps to 6.75% citing sticky inflation',
+  sectors: ['Banking', 'Auto'],
+})
+const banking = hike.sectorImpacts.find((s) => s.entity === 'Banking')
+// A rate hike is genuinely both for a bank: margin widens on floating-rate
+// assets while loan growth slows. Forcing one direction loses the real answer.
+check('rate hike is mixed for banks', banking.direction, 'MIXED')
+checkThat('rate hike names the margin benefit',
+  banking.positives.some((t) => /margin|reprice/i.test(t)), JSON.stringify(banking.positives))
+checkThat('rate hike names the volume cost',
+  banking.negatives.some((t) => /loan growth|deposit/i.test(t)), JSON.stringify(banking.negatives))
+check('rate hike hurts autos', hike.sectorImpacts.find((s) => s.entity === 'Auto').direction, 'NEGATIVE')
+
+const weakRupee = analyseImpact({
+  title: 'Rupee falls to record low of 89 against the US dollar',
+  sectors: ['IT', 'Energy'],
+})
+check('weak rupee helps exporters',
+  weakRupee.sectorImpacts.find((s) => s.entity === 'IT').direction, 'POSITIVE')
+check('weak rupee hurts importers',
+  weakRupee.sectorImpacts.find((s) => s.entity === 'Energy').direction, 'NEGATIVE')
+
+const unknown = analyseImpact({ title: 'A pleasant afternoon in Mumbai', sectors: ['Banking'] })
+check('unrecognised headline offers no read', unknown.unrecognised, true)
+check('unrecognised headline is neutral, not guessed',
+  unknown.sectorImpacts[0].direction, 'NEUTRAL')
+checkThat('unrecognised headline lists no points',
+  unknown.sectorImpacts[0].positives.length === 0 && unknown.sectorImpacts[0].negatives.length === 0)
+
+const withCompanies = analyseImpact({
+  title: 'RBI cuts repo rate by 50 bps to revive growth',
+  sectors: ['Banking'],
+  companies: [{ symbol: 'HDFCBANK', name: 'HDFC Bank', sector: 'Banking' }],
+})
+checkThat('company impacts are produced', withCompanies.companyImpacts.length === 1)
+check('company impact carries the company name', withCompanies.companyImpacts[0].entity, 'HDFC Bank')
+checkThat('company impact has both sides',
+  withCompanies.companyImpacts[0].positives.length > 0 &&
+    withCompanies.companyImpacts[0].negatives.length > 0)
 
 console.log(
   failures === 0
