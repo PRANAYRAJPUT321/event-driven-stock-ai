@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { fetchMarketBar, CATEGORY_LABELS } from '@/lib/market/yahooFinance'
+import { fetchMarketBar, CATEGORY_LABELS, HEATMAP_SYMBOLS } from '@/lib/market/yahooFinance'
 
 // Yahoo sends no CORS headers, so the browser can't call it directly — this
 // route is the server-side proxy. Deliberately public (no auth): it returns
@@ -15,9 +15,17 @@ export const dynamic = 'force-dynamic'
 
 const REVALIDATE_SECONDS = 60
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const { quotes, failed, fetchedAt } = await fetchMarketBar(REVALIDATE_SECONDS)
+    // ?scope=full returns the whole heatmap set (~66 instruments); the default
+    // is the compact list the header bar shows. Two scopes rather than one
+    // because the bar is read at a glance and the heatmap is read deliberately
+    // — and because the wide set costs proportionally more upstream requests.
+    const scope = new URL(request.url).searchParams.get('scope')
+    const { quotes, failed, fetchedAt } = await fetchMarketBar(
+      REVALIDATE_SECONDS,
+      scope === 'full' ? HEATMAP_SYMBOLS : undefined
+    )
 
     if (quotes.length === 0) {
       return NextResponse.json(

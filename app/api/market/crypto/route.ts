@@ -11,7 +11,7 @@ const REVALIDATE_SECONDS = 120
 
 export async function GET() {
   try {
-    const coins = await fetchTopCrypto(16)
+    const coins = await fetchTopCrypto(50)
     if (coins.length === 0) {
       return NextResponse.json({ error: 'CoinGecko returned no coins' }, { status: 502 })
     }

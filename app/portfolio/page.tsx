@@ -6,7 +6,6 @@ import { createClient, getSessionUser } from '@/lib/supabase/client'
 import BackendDownNotice from '@/components/BackendDownNotice'
 import AppShell from '@/components/layout/AppShell'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
-import { getSimulatedPrice } from '@/lib/market/mockData'
 import type { User } from '@supabase/supabase-js'
 
 interface Position {
@@ -19,8 +18,9 @@ interface Position {
 }
 
 interface PositionWithPnl extends Position {
-  currentPrice: number
-  pnlPct: number
+  /** null when the live price could not be fetched — never an invented one. */
+  currentPrice: number | null
+  pnlPct: number | null
 }
 
 export default function Portfolio() {
@@ -56,9 +56,33 @@ export default function Portfolio() {
       .eq('user_id', user.id)
       .order('entry_date', { ascending: false })
 
-    const withPnl: PositionWithPnl[] = (data || []).map((p: Position) => {
-      const currentPrice = getSimulatedPrice(p.symbol, p.entry_price, p.entry_date)
-      return { ...p, currentPrice, pnlPct: ((currentPrice - p.entry_price) / p.entry_price) * 100 }
+    const rows: Position[] = data || []
+
+    // Mark to the real market. This used to call getSimulatedPrice — a seeded
+    // random walk forward from the entry price — so the P&L shown was a
+    // simulation presented as a result. A position whose price cannot be
+    // fetched is reported as unpriced rather than given an invented one.
+    let prices: Record<string, { price: number }> = {}
+    if (rows.length > 0) {
+      try {
+        const symbols = Array.from(new Set(rows.map((r) => r.symbol))).join(',')
+        const response = await fetch(`/api/stocks/prices?symbols=${encodeURIComponent(symbols)}`)
+        if (response.ok) prices = (await response.json()).prices || {}
+      } catch {
+        // Leave prices empty; every row then shows as unpriced.
+      }
+    }
+
+    const withPnl: PositionWithPnl[] = rows.map((p: Position) => {
+      const currentPrice = prices[p.symbol]?.price ?? null
+      return {
+        ...p,
+        currentPrice,
+        pnlPct:
+          currentPrice !== null && p.entry_price > 0
+            ? ((currentPrice - p.entry_price) / p.entry_price) * 100
+            : null,
+      }
     })
 
     setPositions(withPnl)
@@ -77,10 +101,14 @@ export default function Portfolio() {
     router.push('/auth/login')
   }
 
-  const positive = positions.filter((p) => p.pnlPct >= 0).length
-  const avgPnl = positions.length
-    ? positions.reduce((sum, p) => sum + p.pnlPct, 0) / positions.length
+  // Only priced positions can contribute to a return figure; including
+  // unpriced ones as zero would understate and overstate by turns.
+  const priced = positions.filter((p): p is PositionWithPnl & { pnlPct: number } => p.pnlPct !== null)
+  const positive = priced.filter((p) => p.pnlPct >= 0).length
+  const avgPnl = priced.length
+    ? priced.reduce((sum, p) => sum + p.pnlPct, 0) / priced.length
     : 0
+  const unpricedCount = positions.length - priced.length
 
   // Supabase unreachable: this page's content lives in Postgres, so
   // there is nothing to show and nowhere useful to redirect to.
@@ -171,15 +199,21 @@ export default function Portfolio() {
                     )}
                   </div>
                   <p className="text-xs text-ink-faint mt-1.5 mono-tabular">
-                    Entry ₹{p.entry_price.toFixed(2)} on {new Date(p.entry_date).toLocaleDateString()} · Simulated now ₹
-                    {p.currentPrice.toFixed(2)}
+                    Entry ₹{p.entry_price.toFixed(2)} on {new Date(p.entry_date).toLocaleDateString()}
+                    {p.currentPrice !== null
+                      ? ` · Live ₹${p.currentPrice.toFixed(2)}`
+                      : ' · live price unavailable'}
                   </p>
                 </div>
                 <div className="flex items-center gap-4">
-                  <span className={`mono-tabular text-lg font-bold ${p.pnlPct >= 0 ? 'text-buy' : 'text-avoid'}`}>
-                    {p.pnlPct >= 0 ? '+' : ''}
-                    {p.pnlPct.toFixed(1)}%
-                  </span>
+                  {p.pnlPct === null ? (
+                    <span className="mono-tabular text-sm text-ink-faint">—</span>
+                  ) : (
+                    <span className={`mono-tabular text-lg font-bold ${p.pnlPct >= 0 ? 'text-buy' : 'text-avoid'}`}>
+                      {p.pnlPct >= 0 ? '+' : ''}
+                      {p.pnlPct.toFixed(1)}%
+                    </span>
+                  )}
                   <button
                     onClick={() => handleRemove(p.id)}
                     disabled={removingId === p.id}

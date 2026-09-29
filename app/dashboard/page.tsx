@@ -9,7 +9,6 @@ import type { User } from '@supabase/supabase-js'
 import AppShell from '@/components/layout/AppShell'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import ScoreChip from '@/components/ui/ScoreChip'
-import { getSimulatedPrice } from '@/lib/market/mockData'
 
 interface RecentAnalysis {
   id: string
@@ -122,20 +121,36 @@ export default function Dashboard() {
       setSectorTilts(tilts)
 
       // Track record / calibration: how simulated paper positions (from the
-      // "Simulate" action on event detail pages) actually moved against
-      // this project's own deterministic price model, grouped by the
-      // recommendation that prompted each one — the explainability
-      // differentiator this project's README calls out, made concrete.
+      // "Simulate" action on event detail pages) have actually moved at live
+      // market prices, grouped by the recommendation that prompted each one —
+      // the explainability differentiator this project's README calls out,
+      // made concrete and measurable.
       const { data: positions } = await supabase
         .from('portfolio_positions')
         .select('symbol, recommendation, entry_price, entry_date')
         .eq('user_id', sessionUser.id)
 
       if (positions && positions.length > 0) {
+        // Marked to the real market. This previously used getSimulatedPrice,
+        // a seeded random walk from the entry price, which meant the "track
+        // record" was a simulation of itself. Positions whose price cannot be
+        // fetched are excluded from the record rather than counted as flat.
+        let prices: Record<string, { price: number }> = {}
+        try {
+          const symbols = Array.from(new Set(positions.map((p: any) => p.symbol))).join(',')
+          const response = await fetch(`/api/stocks/prices?symbols=${encodeURIComponent(symbols)}`)
+          if (response.ok) prices = (await response.json()).prices || {}
+        } catch {
+          // Leave empty — the record then reports zero priced positions.
+        }
+
         const byRec: Record<string, { count: number; positive: number }> = {}
         let positive = 0
+        let priced = 0
         for (const p of positions) {
-          const current = getSimulatedPrice(p.symbol, p.entry_price, p.entry_date)
+          const current = prices[p.symbol]?.price
+          if (current === undefined) continue
+          priced++
           const isPositive = current >= p.entry_price
           if (isPositive) positive++
           const rec = p.recommendation || 'UNKNOWN'
@@ -144,7 +159,7 @@ export default function Dashboard() {
           if (isPositive) entry.positive++
           byRec[rec] = entry
         }
-        setTrackRecord({ total: positions.length, positive, byRec })
+        if (priced > 0) setTrackRecord({ total: priced, positive, byRec })
       }
 
       setLoading(false)

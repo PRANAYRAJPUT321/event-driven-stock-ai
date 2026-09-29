@@ -154,10 +154,15 @@ export interface DecisionInput {
   eventMagnitude: number
   stockSymbol: string
   compositeScore: number
-  fundamentalScore: number
-  valuationScore: number
-  technicalScore: number
-  riskScore: number
+  /**
+   * null when the factor had no sourced input and was excluded from the
+   * composite — see calculateCompositeFromAvailable. The narrative says so
+   * instead of treating a missing input as a neutral score.
+   */
+  fundamentalScore: number | null
+  valuationScore: number | null
+  technicalScore: number | null
+  riskScore: number | null
   historicalSummary?: string
 }
 
@@ -175,6 +180,11 @@ export interface DecisionOutput {
  * passed in here as context — the AI explains and challenges the numbers, it never
  * produces or overrides them (spec section 19 & 20).
  */
+/** Renders a factor for the prompt without inventing a value for a missing one. */
+function fmtScore(score: number | null): string {
+  return score === null ? 'not available' : `${score}/100`
+}
+
 export async function generateCounterArgument(input: DecisionInput): Promise<DecisionOutput> {
   const prompt = `
 You are the counter-argument and explainability layer of an event-driven equity
@@ -188,10 +198,12 @@ Event direction: ${input.eventDirection} (magnitude ${input.eventMagnitude}/100)
 
 Stock: ${input.stockSymbol}
 Composite Event Opportunity Score: ${input.compositeScore}/100
-Fundamental Score: ${input.fundamentalScore}/100
-Valuation Score: ${input.valuationScore}/100
-Technical Score: ${input.technicalScore}/100
-Risk Score: ${input.riskScore}/100
+Fundamental Score: ${fmtScore(input.fundamentalScore)}
+Valuation Score: ${fmtScore(input.valuationScore)}
+Technical Score: ${fmtScore(input.technicalScore)}
+Risk Score: ${fmtScore(input.riskScore)}
+Factors marked "not available" could not be sourced and were excluded from the
+composite entirely. Do not guess at them or treat them as average.
 ${input.historicalSummary ? `Historical evidence: ${input.historicalSummary}` : 'Historical evidence: limited data available'}
 
 Before concluding, actively try to challenge the thesis implied by the scores.

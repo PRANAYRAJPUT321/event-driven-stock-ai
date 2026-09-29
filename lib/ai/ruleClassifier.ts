@@ -623,7 +623,14 @@ export function buildCounterArgumentFromRules(input: DecisionInput): DecisionOut
 
   const strengths: string[] = []
   const weaknesses: string[] = []
-  const add = (label: string, score: number, high: string, low: string) => {
+  const unavailable: string[] = []
+  const add = (label: string, score: number | null, high: string, low: string) => {
+    // A factor with no sourced data is neither a strength nor a weakness; it
+    // is a gap, and naming it is more honest than quietly omitting it.
+    if (score === null) {
+      unavailable.push(label)
+      return
+    }
     if (score >= 60) strengths.push(`${label} ${score}/100 — ${high}`)
     else if (score <= 45) weaknesses.push(`${label} ${score}/100 — ${low}`)
   }
@@ -649,22 +656,25 @@ export function buildCounterArgumentFromRules(input: DecisionInput): DecisionOut
         ? `The supporting components are ${strengths.join('; ')}.`
         : 'No individual component scores strongly here, so the case rests on the event rather than on the company.'),
     bearCase:
-      weaknesses.length > 0
+      (weaknesses.length > 0
         ? `The case breaks where ${weaknesses.join('; ')}. Any of those can absorb the event’s benefit before it reaches shareholders.`
-        : `No component scores poorly, which is itself the risk: with nothing obviously cheap or mispriced, much of the event may already be in the price, and the ${eventMagnitude}/100 magnitude may be the market’s estimate rather than an edge.`,
+        : `No component scores poorly, which is itself the risk: with nothing obviously cheap or mispriced, much of the event may already be in the price, and the ${eventMagnitude}/100 magnitude may be the market’s estimate rather than an edge.`) +
+      (unavailable.length > 0
+        ? ` Note also that ${unavailable.join(' and ')} could not be sourced for this stock, so the composite rests on less evidence than a full score would.`
+        : ''),
     contradictoryEvidence:
-      valuationScore <= 45
+      valuationScore !== null && valuationScore <= 45
         ? `Valuation at ${valuationScore}/100 disagrees with the thesis — the market is already paying up for this name, so the event has to exceed expectations, not merely meet them.`
-        : technicalScore <= 45
+        : technicalScore !== null && technicalScore <= 45
           ? `Technicals at ${technicalScore}/100 disagree with the thesis — price is not yet behaving as though the event helps, which either means the market disputes the mechanism or it has not reacted yet.`
-          : riskScore <= 45
+          : riskScore !== null && riskScore <= 45
             ? `Risk at ${riskScore}/100 disagrees with the thesis — the balance sheet or volatility profile makes this name a poor vehicle for the view even if the view is right.`
             : 'No component contradicts the thesis outright; the strongest counterpoint is that a well-scored, well-known name is where an event is most likely to already be priced in.',
     keyRisks: [
       eventDirection === 'NEGATIVE'
         ? 'The event may prove milder or shorter-lived than the magnitude implies, making the sell-off the opportunity rather than the risk.'
         : 'The event may already be priced in, leaving no move even if the mechanism plays out exactly as described.',
-      riskScore <= 55
+      riskScore !== null && riskScore <= 55
         ? `Elevated leverage or volatility (risk ${riskScore}/100) amplifies the downside if the event goes the other way.`
         : 'Company-specific execution can override a correct sector call.',
       'Transmission from a macro event to a single company is indirect: the mechanism can hold at sector level while this particular name diverges.',

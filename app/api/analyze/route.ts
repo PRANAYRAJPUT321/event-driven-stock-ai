@@ -2,25 +2,21 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/server'
 import { classifyEvent, generateCounterArgument } from '@/lib/ai/eventClassifier'
 import { buildCounterArgumentFromRules, classifyEventByRules } from '@/lib/ai/ruleClassifier'
-import {
-  getMockFundamentals,
-  getMockValuation,
-  getMockTechnical,
-  getMockRisk,
-  riskScoreToLevel,
-} from '@/lib/market/mockData'
+import { fetchStockMetrics, type StockMetrics } from '@/lib/market/realMetrics'
 import {
   getHistoricalReaction,
   historicalReturnToScore,
 } from '@/lib/market/historicalEngine'
-import { dedupeByCompany, stocksForSectors, type UniverseStock } from '@/lib/market/stockUniverse'
+import { equitiesForSectors, type EquityConstituent } from '@/lib/market/indianEquities'
 import {
-  calculateCompositeScore,
-  calculateFundamentalScore,
-  calculateValuationScore,
-  calculateTechnicalScore,
-  calculateRiskScore,
+  calculateCompositeFromAvailable,
+  riskScoreToLevel,
+  median,
+  scoreFundamental,
+  scoreRisk,
+  scoreTechnical,
   scoreToRecommendation,
+  scoreValuation,
 } from '@/lib/scoring/scoreCalculator'
 
 const MAX_STOCKS_ANALYZED = 6
@@ -110,74 +106,62 @@ export async function POST(request: NextRequest) {
       : 50 // neutral fallback when no historical match exists
 
     // ── STEP 3: Affected Stocks ─────────────────────────────────────────
-    // The `stocks` table is the source of truth when reachable; the generated
-    // universe in lib/market/stockUniverse.ts is the same data as code, so an
-    // unreachable database narrows what can be saved, not what can be scored.
+    // The NIFTY 50 constituent list (lib/market/indianEquities.ts) is the
+    // universe, not the `stocks` table: the table was seeded with tickers that
+    // do not resolve on any exchange, and every symbol here is fetched live
+    // from Yahoo, where a wrong ticker is simply a 404.
     const sectors = classification.affected_sectors ?? []
-    let affectedStocks: (UniverseStock & { id?: string })[] = []
+    const candidates: EquityConstituent[] = equitiesForSectors(sectors, MAX_STOCKS_ANALYZED)
+
+    // Map to database ids where the table has them, so a signed-in analysis
+    // can still be watchlisted and stored against a real row.
+    const idBySymbol = new Map<string, string>()
     if (user && supabase) {
       try {
-        let stocksQuery = supabase.from('stocks').select('*')
-        if (sectors.length > 0) stocksQuery = stocksQuery.in('sector', sectors)
-        const { data } = await stocksQuery.limit(MAX_STOCKS_ANALYZED)
-        if (data && data.length > 0) {
-          affectedStocks = dedupeByCompany(data).map((row: any) => ({
-            id: row.id,
-            symbol: row.symbol,
-            name: row.name,
-            sector: row.sector,
-            peRatio: row.pe_ratio,
-            pbRatio: row.pb_ratio,
-            dividendYield: row.dividend_yield,
-          }))
-        }
+        const { data } = await supabase
+          .from('stocks')
+          .select('id, symbol')
+          .in('symbol', candidates.map((c) => c.symbol))
+        for (const row of data ?? []) idBySymbol.set(row.symbol, row.id)
       } catch {
-        // Fall through to the built-in universe.
+        // Not fatal: without an id the stock is scored but not linkable.
       }
     }
-    if (affectedStocks.length === 0) {
-      affectedStocks = stocksForSectors(sectors, MAX_STOCKS_ANALYZED)
-    }
 
-    // ── STEP 4: Deterministic Multi-Factor Scoring per stock ────────────
+    // ── STEP 4: Multi-Factor Scoring from real market data ──────────────
     const eventImpactScore = classification.direction === 'NEGATIVE'
       ? 50 - classification.magnitude / 2
       : classification.direction === 'POSITIVE'
         ? 50 + classification.magnitude / 2
         : 50
 
-    const stockResults = affectedStocks.map((stock) => {
-      const fundamentals = getMockFundamentals(stock.symbol)
-      const valuation = getMockValuation(stock.symbol, stock.sector)
-      const technical = getMockTechnical(stock.symbol)
-      const risk = getMockRisk(stock.symbol)
+    // One fetch per candidate, in parallel. Each pulls a year of daily closes
+    // (for technicals) and, where Yahoo's fundamentals tier answers, the
+    // valuation and company figures.
+    const metricsSettled = await Promise.allSettled(
+      candidates.map((c) => fetchStockMetrics(c.symbol, c.name, c.sector))
+    )
+    const metricsBySymbol = new Map<string, StockMetrics>()
+    metricsSettled.forEach((outcome, i) => {
+      if (outcome.status === 'fulfilled') metricsBySymbol.set(candidates[i].symbol, outcome.value)
+    })
 
-      const fundamentalScore = calculateFundamentalScore(
-        fundamentals.roe,
-        fundamentals.roce,
-        fundamentals.profitGrowth,
-        fundamentals.revenueGrowth
-      )
-      const valuationScore = calculateValuationScore(
-        valuation.peRatio,
-        valuation.pbRatio,
-        valuation.sectorAvgPe,
-        valuation.sectorAvgPb
-      )
-      const technicalScore = calculateTechnicalScore(
-        technical.price,
-        technical.sma50,
-        technical.sma200,
-        technical.rsi
-      )
-      const riskScoreValue = calculateRiskScore(
-        risk.beta,
-        risk.volatility,
-        fundamentals.debtEquity,
-        fundamentals.interestCoverage
-      )
+    // Valuation is relative, so the benchmark is the median of the peers
+    // actually in this analysis — measured, rather than a hardcoded sector
+    // table of assumed multiples.
+    const allMetrics = candidates.map((c) => metricsBySymbol.get(c.symbol) ?? null)
+    const peerMedianPe = median(allMetrics.map((m) => m?.valuation?.peRatio ?? null))
+    const peerMedianPb = median(allMetrics.map((m) => m?.valuation?.pbRatio ?? null))
 
-      const compositeScore = calculateCompositeScore({
+    const stockResults = candidates.map((stock) => {
+      const metrics = metricsBySymbol.get(stock.symbol) ?? null
+
+      const fundamentalScore = scoreFundamental(metrics?.fundamental ?? null)
+      const valuationScore = scoreValuation(metrics?.valuation ?? null, peerMedianPe, peerMedianPb)
+      const technicalScore = scoreTechnical(metrics?.technical ?? null)
+      const riskScoreValue = scoreRisk(metrics?.risk ?? null)
+
+      const composite = calculateCompositeFromAvailable({
         eventImpact: eventImpactScore,
         historicalReaction: historicalReactionScore,
         fundamentalStrength: fundamentalScore,
@@ -187,17 +171,16 @@ export async function POST(request: NextRequest) {
       })
 
       return {
-        stock,
-        fundamentals,
-        valuation,
-        technical,
-        risk,
+        stock: { ...stock, id: idBySymbol.get(stock.symbol) },
+        metrics,
         fundamentalScore,
         valuationScore,
         technicalScore,
         riskScoreValue,
-        compositeScore,
-        recommendation: scoreToRecommendation(compositeScore),
+        compositeScore: composite.score,
+        coverage: composite.coverage,
+        excludedFactors: composite.excluded,
+        recommendation: scoreToRecommendation(composite.score),
       }
     })
 
@@ -314,7 +297,26 @@ export async function POST(request: NextRequest) {
           riskLevel: riskScoreToLevel(r.riskScoreValue),
           opportunityScore: r.compositeScore,
           recommendation: r.recommendation,
+          // How much of the default weighting had real data behind it, and
+          // which factors were dropped for want of a source. Surfaced so the
+          // UI can qualify a score instead of presenting every one as equally
+          // well-evidenced.
+          coverage: r.coverage,
+          excludedFactors: r.excludedFactors,
+          // The measured inputs themselves, so the page can show what the
+          // score was actually computed from.
+          price: r.metrics?.technical?.price ?? null,
+          changePct: r.metrics?.technical?.changePct ?? null,
+          peRatio: r.metrics?.valuation?.peRatio ?? null,
+          pbRatio: r.metrics?.valuation?.pbRatio ?? null,
+          marketCap: r.metrics?.valuation?.marketCap ?? null,
+          returnOnEquityPct: r.metrics?.fundamental?.returnOnEquityPct ?? null,
+          rsi14: r.metrics?.technical?.rsi14 ?? null,
+          volatilityPct: r.metrics?.technical?.volatilityPct ?? null,
+          dataNotes: r.metrics?.notes ?? ['No market data could be fetched for this stock'],
         })),
+        peerMedianPe,
+        peerMedianPb,
       },
       topStock: topStock?.stock.symbol,
       stockCount: stockResults.length,

@@ -11,7 +11,6 @@ import ReturnSparkline from '@/components/charts/ReturnSparkline'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import ScoreChip from '@/components/ui/ScoreChip'
 import NewsImpactPanel from '@/components/NewsImpactPanel'
-import { getMockTechnical } from '@/lib/market/mockData'
 import type { User } from '@supabase/supabase-js'
 import type { MarketQuote } from '@/lib/market/yahooFinance'
 
@@ -205,7 +204,29 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   async function handleSimulate(stock: StockScore) {
     if (!userId || !analysis || positionedIds.has(stock.id)) return
     setPositioningId(stock.id)
-    const entryPrice = getMockTechnical(stock.stock_symbol).price
+    // The entry price of a paper position has to be a real one — this used to
+    // be getMockTechnical(), a hash of the ticker, which made every recorded
+    // position and its later P&L fictional from the moment it was created.
+    let entryPrice: number | null = null
+    try {
+      const response = await fetch(
+        `/api/stocks/prices?symbols=${encodeURIComponent(stock.stock_symbol)}`
+      )
+      if (response.ok) {
+        const data = await response.json()
+        entryPrice = data.prices?.[stock.stock_symbol.toUpperCase()]?.price ?? null
+      }
+    } catch {
+      // Handled below.
+    }
+    if (entryPrice === null) {
+      setPositioningId(null)
+      alert(
+        `Could not fetch a live price for ${stock.stock_symbol}, so this position was not opened. ` +
+          'Recording it at a made-up entry price would make its P&L meaningless.'
+      )
+      return
+    }
     const { error } = await supabase.from('portfolio_positions').insert({
       user_id: userId,
       stock_scores_id: stock.id,

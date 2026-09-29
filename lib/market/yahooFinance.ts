@@ -40,35 +40,122 @@ export interface TrackedSymbol {
  * The bar's contents. Domestic first — this is an Indian-equity product, so
  * NIFTY/SENSEX should be what a user sees before the marquee moves.
  */
+/**
+ * The compact set shown in the always-on header bar. Kept deliberately short:
+ * a marquee people can actually read beats an exhaustive one they cannot.
+ * Domestic first, because this is an Indian-equity product.
+ */
 export const TRACKED_SYMBOLS: TrackedSymbol[] = [
-  // Domestic (India)
   { symbol: '^NSEI', name: 'NIFTY 50', category: 'domestic' },
   { symbol: '^BSESN', name: 'SENSEX', category: 'domestic' },
   { symbol: '^NSEBANK', name: 'BANK NIFTY', category: 'domestic' },
   { symbol: '^CNXIT', name: 'NIFTY IT', category: 'domestic' },
   { symbol: '^INDIAVIX', name: 'INDIA VIX', category: 'domestic' },
 
-  // International
   { symbol: '^GSPC', name: 'S&P 500', category: 'international' },
   { symbol: '^IXIC', name: 'NASDAQ', category: 'international' },
   { symbol: '^DJI', name: 'DOW JONES', category: 'international' },
   { symbol: '^FTSE', name: 'FTSE 100', category: 'international' },
-  { symbol: '^GDAXI', name: 'DAX', category: 'international' },
   { symbol: '^N225', name: 'NIKKEI 225', category: 'international' },
   { symbol: '^HSI', name: 'HANG SENG', category: 'international' },
 
-  // Commodities (front-month futures)
   { symbol: 'GC=F', name: 'GOLD', category: 'commodity' },
   { symbol: 'SI=F', name: 'SILVER', category: 'commodity' },
   { symbol: 'CL=F', name: 'WTI CRUDE', category: 'commodity' },
   { symbol: 'BZ=F', name: 'BRENT CRUDE', category: 'commodity' },
-  { symbol: 'NG=F', name: 'NAT GAS', category: 'commodity' },
-  { symbol: 'HG=F', name: 'COPPER', category: 'commodity' },
 
-  // Currency
+  { symbol: 'USDINR=X', name: 'USD/INR', category: 'currency' },
+  { symbol: 'EURINR=X', name: 'EUR/INR', category: 'currency' },
+]
+
+/**
+ * The full set behind the /markets heatmaps. Everything the bar carries, plus
+ * the breadth a heatmap is actually for: Indian sector indices, the major
+ * exchanges of every region, the commodity complex, and the INR crosses that
+ * matter to Indian importers and exporters.
+ *
+ * Each entry is one upstream request, so this list is the page's cost — which
+ * is why it is fetched once per minute at the edge and shared by all callers
+ * rather than per visitor.
+ */
+export const HEATMAP_SYMBOLS: TrackedSymbol[] = [
+  // ── India: headline and sector indices ──────────────────────────────
+  { symbol: '^NSEI', name: 'NIFTY 50', category: 'domestic' },
+  { symbol: '^BSESN', name: 'SENSEX', category: 'domestic' },
+  { symbol: '^NSEBANK', name: 'BANK NIFTY', category: 'domestic' },
+  { symbol: '^CNXIT', name: 'NIFTY IT', category: 'domestic' },
+  { symbol: '^CNXAUTO', name: 'NIFTY AUTO', category: 'domestic' },
+  { symbol: '^CNXPHARMA', name: 'NIFTY PHARMA', category: 'domestic' },
+  { symbol: '^CNXFMCG', name: 'NIFTY FMCG', category: 'domestic' },
+  { symbol: '^CNXMETAL', name: 'NIFTY METAL', category: 'domestic' },
+  { symbol: '^CNXENERGY', name: 'NIFTY ENERGY', category: 'domestic' },
+  { symbol: '^CNXREALTY', name: 'NIFTY REALTY', category: 'domestic' },
+  { symbol: '^CNXINFRA', name: 'NIFTY INFRA', category: 'domestic' },
+  { symbol: '^CNXPSUBANK', name: 'NIFTY PSU BANK', category: 'domestic' },
+  { symbol: '^NSEMDCP50', name: 'NIFTY MIDCAP 50', category: 'domestic' },
+  { symbol: '^INDIAVIX', name: 'INDIA VIX', category: 'domestic' },
+
+  // ── Americas ────────────────────────────────────────────────────────
+  { symbol: '^GSPC', name: 'S&P 500', category: 'international' },
+  { symbol: '^IXIC', name: 'NASDAQ COMPOSITE', category: 'international' },
+  { symbol: '^DJI', name: 'DOW JONES', category: 'international' },
+  { symbol: '^RUT', name: 'RUSSELL 2000', category: 'international' },
+  { symbol: '^VIX', name: 'CBOE VIX', category: 'international' },
+  { symbol: '^GSPTSE', name: 'TSX COMPOSITE', category: 'international' },
+  { symbol: '^BVSP', name: 'BOVESPA', category: 'international' },
+  { symbol: '^MXX', name: 'IPC MEXICO', category: 'international' },
+
+  // ── Europe ──────────────────────────────────────────────────────────
+  { symbol: '^FTSE', name: 'FTSE 100', category: 'international' },
+  { symbol: '^GDAXI', name: 'DAX', category: 'international' },
+  { symbol: '^FCHI', name: 'CAC 40', category: 'international' },
+  { symbol: '^STOXX50E', name: 'EURO STOXX 50', category: 'international' },
+  { symbol: '^IBEX', name: 'IBEX 35', category: 'international' },
+  { symbol: 'FTSEMIB.MI', name: 'FTSE MIB', category: 'international' },
+  { symbol: '^AEX', name: 'AEX', category: 'international' },
+  { symbol: '^SSMI', name: 'SMI', category: 'international' },
+
+  // ── Asia-Pacific & Middle East ──────────────────────────────────────
+  { symbol: '^N225', name: 'NIKKEI 225', category: 'international' },
+  { symbol: '^HSI', name: 'HANG SENG', category: 'international' },
+  { symbol: '000001.SS', name: 'SHANGHAI COMPOSITE', category: 'international' },
+  { symbol: '399001.SZ', name: 'SHENZHEN COMPONENT', category: 'international' },
+  { symbol: '^KS11', name: 'KOSPI', category: 'international' },
+  { symbol: '^TWII', name: 'TAIWAN WEIGHTED', category: 'international' },
+  { symbol: '^AXJO', name: 'ASX 200', category: 'international' },
+  { symbol: '^STI', name: 'STRAITS TIMES', category: 'international' },
+  { symbol: '^JKSE', name: 'JAKARTA COMPOSITE', category: 'international' },
+  { symbol: '^KLSE', name: 'FTSE BURSA MALAYSIA', category: 'international' },
+  { symbol: '^TA125.TA', name: 'TA-125 ISRAEL', category: 'international' },
+
+  // ── Commodities ─────────────────────────────────────────────────────
+  { symbol: 'GC=F', name: 'GOLD', category: 'commodity' },
+  { symbol: 'SI=F', name: 'SILVER', category: 'commodity' },
+  { symbol: 'PL=F', name: 'PLATINUM', category: 'commodity' },
+  { symbol: 'PA=F', name: 'PALLADIUM', category: 'commodity' },
+  { symbol: 'HG=F', name: 'COPPER', category: 'commodity' },
+  { symbol: 'CL=F', name: 'WTI CRUDE', category: 'commodity' },
+  { symbol: 'BZ=F', name: 'BRENT CRUDE', category: 'commodity' },
+  { symbol: 'NG=F', name: 'NATURAL GAS', category: 'commodity' },
+  { symbol: 'RB=F', name: 'GASOLINE', category: 'commodity' },
+  { symbol: 'ZC=F', name: 'CORN', category: 'commodity' },
+  { symbol: 'ZW=F', name: 'WHEAT', category: 'commodity' },
+  { symbol: 'ZS=F', name: 'SOYBEAN', category: 'commodity' },
+  { symbol: 'SB=F', name: 'SUGAR', category: 'commodity' },
+  { symbol: 'KC=F', name: 'COFFEE', category: 'commodity' },
+  { symbol: 'CT=F', name: 'COTTON', category: 'commodity' },
+
+  // ── Currencies ──────────────────────────────────────────────────────
   { symbol: 'USDINR=X', name: 'USD/INR', category: 'currency' },
   { symbol: 'EURINR=X', name: 'EUR/INR', category: 'currency' },
   { symbol: 'GBPINR=X', name: 'GBP/INR', category: 'currency' },
+  { symbol: 'JPYINR=X', name: 'JPY/INR', category: 'currency' },
+  { symbol: 'AEDINR=X', name: 'AED/INR', category: 'currency' },
+  { symbol: 'CNYINR=X', name: 'CNY/INR', category: 'currency' },
+  { symbol: 'EURUSD=X', name: 'EUR/USD', category: 'currency' },
+  { symbol: 'GBPUSD=X', name: 'GBP/USD', category: 'currency' },
+  { symbol: 'USDJPY=X', name: 'USD/JPY', category: 'currency' },
+  { symbol: 'DX-Y.NYB', name: 'DOLLAR INDEX', category: 'currency' },
 ]
 
 export const CATEGORY_LABELS: Record<QuoteCategory, string> = {
@@ -195,16 +282,58 @@ export interface MarketBarData {
  * failure — callers get whatever resolved plus the list that didn't, and only
  * an empty `quotes` array means the upstream is genuinely unavailable.
  */
-export async function fetchMarketBar(revalidateSeconds = 60): Promise<MarketBarData> {
-  const settled = await Promise.allSettled(
-    TRACKED_SYMBOLS.map((t) => fetchOne(t, revalidateSeconds))
-  )
+export async function fetchMarketBar(
+  revalidateSeconds = 60,
+  symbols: TrackedSymbol[] = TRACKED_SYMBOLS
+): Promise<MarketBarData> {
+  const settled = await Promise.allSettled(symbols.map((t) => fetchOne(t, revalidateSeconds)))
 
   const quotes: MarketQuote[] = []
   const failed: string[] = []
   settled.forEach((outcome, i) => {
     if (outcome.status === 'fulfilled') quotes.push(outcome.value)
-    else failed.push(TRACKED_SYMBOLS[i].symbol)
+    else failed.push(symbols[i].symbol)
+  })
+
+  return { quotes, failed, fetchedAt: new Date().toISOString() }
+}
+
+/**
+ * Live quotes for a list of NSE-listed equities.
+ *
+ * Separate from fetchMarketBar so the index/commodity request and the
+ * fifty-odd equity requests do not compound into one very slow call — each
+ * endpoint stays inside a serverless function's budget on its own.
+ */
+export async function fetchEquityQuotes(
+  constituents: { symbol: string; name: string; sector: string }[],
+  revalidateSeconds = 60
+): Promise<{ quotes: (MarketQuote & { sector: string })[]; failed: string[]; fetchedAt: string }> {
+  const settled = await Promise.allSettled(
+    constituents.map((c) =>
+      fetchOne(
+        // .NS is Yahoo's suffix for the NSE. The category is only used for
+        // grouping in the bar, which equities never appear in.
+        { symbol: `${c.symbol}.NS`, name: c.name, category: 'domestic' },
+        revalidateSeconds
+      )
+    )
+  )
+
+  const quotes: (MarketQuote & { sector: string })[] = []
+  const failed: string[] = []
+  settled.forEach((outcome, i) => {
+    if (outcome.status === 'fulfilled') {
+      quotes.push({
+        ...outcome.value,
+        // Report the NSE symbol, not Yahoo's suffixed form — this is what the
+        // rest of the app links and stores.
+        symbol: constituents[i].symbol,
+        sector: constituents[i].sector,
+      })
+    } else {
+      failed.push(constituents[i].symbol)
+    }
   })
 
   return { quotes, failed, fetchedAt: new Date().toISOString() }

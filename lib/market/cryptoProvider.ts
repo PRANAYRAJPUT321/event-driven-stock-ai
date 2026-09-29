@@ -11,11 +11,11 @@ export interface CryptoQuote {
  * no signup, no key, generous rate limit for a manual-refresh use case
  * like this one.
  */
-export async function fetchTopCrypto(limit = 12): Promise<CryptoQuote[]> {
+export async function fetchTopCrypto(limit = 50): Promise<CryptoQuote[]> {
   const url = new URL('https://api.coingecko.com/api/v3/coins/markets')
   url.searchParams.set('vs_currency', 'usd')
   url.searchParams.set('order', 'market_cap_desc')
-  url.searchParams.set('per_page', String(limit))
+  url.searchParams.set('per_page', String(Math.min(limit, 250)))
   url.searchParams.set('page', '1')
   url.searchParams.set('price_change_percentage', '24h')
 
