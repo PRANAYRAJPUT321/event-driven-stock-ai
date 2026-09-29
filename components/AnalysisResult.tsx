@@ -6,6 +6,7 @@ import TransmissionFlow from '@/components/charts/TransmissionFlow'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import ScoreChip from '@/components/ui/ScoreChip'
 import NewsImpactPanel from '@/components/NewsImpactPanel'
+import ImpactBreakdown from '@/components/ImpactBreakdown'
 
 export interface AnalysisPayload {
   eventTitle: string
@@ -152,6 +153,12 @@ export default function AnalysisResult({ payload }: { payload: AnalysisPayload }
           </div>
         </div>
       )}
+
+      <ImpactBreakdown
+        title={payload.eventTitle}
+        sectors={classification.affected_sectors || []}
+        companies={stocks.slice(0, 6).map((s) => ({ symbol: s.symbol, name: s.name, sector: s.sector }))}
+      />
 
       <div className="panel p-7 mb-6">
         <h2 className="text-sm font-bold text-ink mb-4">Scored Stocks ({stocks.length})</h2>

@@ -15,18 +15,39 @@ interface CryptoCoin {
   marketCap: number
 }
 
-type Tab = 'indices' | 'commodities' | 'crypto'
+type Tab = 'equities' | 'india' | 'world' | 'commodities' | 'currencies' | 'crypto'
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'indices', label: 'Indices' },
-  { id: 'commodities', label: 'Commodities & FX' },
+  { id: 'equities', label: 'NIFTY 50 Stocks' },
+  { id: 'india', label: 'India Indices' },
+  { id: 'world', label: 'World Indices' },
+  { id: 'commodities', label: 'Commodities' },
+  { id: 'currencies', label: 'Currencies' },
   { id: 'crypto', label: 'Crypto' },
 ]
+
+interface EquityQuote {
+  symbol: string
+  name: string
+  sector: string
+  price: number
+  changePct: number
+}
 
 // Heat intensity scales with |change| up to this cap, so a routine ±0.3%
 // index move and a routine ±5% crypto move both read as "mild" rather than
 // crypto tiles being permanently maxed-out red/green.
-const MAX_ABS_PCT: Record<Tab, number> = { indices: 2.5, commodities: 3, crypto: 8 }
+// Each asset class has its own idea of a big day: a 2% index move is large,
+// a 2% crypto move is noise. Scaling per tab keeps the colour meaningful
+// instead of leaving crypto permanently saturated.
+const MAX_ABS_PCT: Record<Tab, number> = {
+  equities: 4,
+  india: 2.5,
+  world: 2.5,
+  commodities: 3,
+  currencies: 1.2,
+  crypto: 8,
+}
 
 function heatStyle(changePct: number, tab: Tab): React.CSSProperties {
   const alpha = Math.min(Math.abs(changePct) / MAX_ABS_PCT[tab], 1) * 0.42 + 0.06
@@ -56,6 +77,8 @@ interface Tile {
   price: number
   changePct: number
   footnote?: string
+  /** Set for tiles that link somewhere — equities link to their profile. */
+  href?: string
 }
 
 export default function Markets() {
@@ -63,12 +86,14 @@ export default function Markets() {
   const supabase = createClient()
   const [user, setUser] = useState<User | null>(null)
   const [quotes, setQuotes] = useState<MarketQuote[]>([])
+  const [equities, setEquities] = useState<EquityQuote[]>([])
   const [coins, setCoins] = useState<CryptoCoin[]>([])
+  const [sectorFilter, setSectorFilter] = useState('All')
   const [failed, setFailed] = useState<string[]>([])
   const [errors, setErrors] = useState<string[]>([])
   const [fetchedAt, setFetchedAt] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<Tab>('indices')
+  const [tab, setTab] = useState<Tab>('equities')
 
   useEffect(() => {
     let active = true
@@ -95,38 +120,46 @@ export default function Markets() {
   }, [])
 
   async function load(active = true) {
-    // Two independent sources: one being rate-limited shouldn't blank the
-    // other's tab.
-    const [marketRes, cryptoRes] = await Promise.allSettled([
-      fetch('/api/market/live').then(async (r) => ({ ok: r.ok, body: await r.json() })),
+    // Three independent sources; one being rate-limited must not blank the
+    // others' tabs, so each is settled and reported separately.
+    const [marketRes, equityRes, cryptoRes] = await Promise.allSettled([
+      fetch('/api/market/live?scope=full').then(async (r) => ({ ok: r.ok, body: await r.json() })),
+      fetch('/api/market/equities').then(async (r) => ({ ok: r.ok, body: await r.json() })),
       fetch('/api/market/crypto').then(async (r) => ({ ok: r.ok, body: await r.json() })),
     ])
     if (!active) return
 
     const nextErrors: string[] = []
+    const nextFailed: string[] = []
 
     if (marketRes.status === 'fulfilled' && marketRes.value.ok) {
       setQuotes(marketRes.value.body.quotes || [])
-      setFailed(marketRes.value.body.failed || [])
+      nextFailed.push(...(marketRes.value.body.failed || []))
       setFetchedAt(marketRes.value.body.fetchedAt || null)
     } else {
       const reason =
-        marketRes.status === 'fulfilled'
-          ? marketRes.value.body?.error
-          : (marketRes.reason as Error)?.message
-      nextErrors.push(`Indices & commodities: ${reason || 'unavailable'}`)
+        marketRes.status === 'fulfilled' ? marketRes.value.body?.error : (marketRes.reason as Error)?.message
+      nextErrors.push(`Indices, commodities & FX: ${reason || 'unavailable'}`)
+    }
+
+    if (equityRes.status === 'fulfilled' && equityRes.value.ok) {
+      setEquities(equityRes.value.body.quotes || [])
+      nextFailed.push(...(equityRes.value.body.failed || []))
+    } else {
+      const reason =
+        equityRes.status === 'fulfilled' ? equityRes.value.body?.error : (equityRes.reason as Error)?.message
+      nextErrors.push(`NIFTY 50 stocks: ${reason || 'unavailable'}`)
     }
 
     if (cryptoRes.status === 'fulfilled' && cryptoRes.value.ok) {
       setCoins(cryptoRes.value.body.coins || [])
     } else {
       const reason =
-        cryptoRes.status === 'fulfilled'
-          ? cryptoRes.value.body?.error
-          : (cryptoRes.reason as Error)?.message
+        cryptoRes.status === 'fulfilled' ? cryptoRes.value.body?.error : (cryptoRes.reason as Error)?.message
       nextErrors.push(`Crypto: ${reason || 'unavailable'}`)
     }
 
+    setFailed(nextFailed)
     setErrors(nextErrors)
     setLoading(false)
   }
@@ -136,43 +169,51 @@ export default function Markets() {
     router.push('/auth/login')
   }
 
-  const indexTiles: Tile[] = quotes
-    .filter((q) => q.category === 'domestic' || q.category === 'international')
-    .map((q) => ({
+  const tilesFor = (predicate: (q: MarketQuote) => boolean, group: (q: MarketQuote) => string): Tile[] =>
+    quotes.filter(predicate).map((q) => ({
       key: q.symbol,
-      group: q.category === 'domestic' ? 'India' : 'Global',
+      group: group(q),
       name: q.name,
       price: q.price,
       changePct: q.changePct,
       footnote: q.currency,
     }))
 
-  const commodityTiles: Tile[] = quotes
-    .filter((q) => q.category === 'commodity' || q.category === 'currency')
-    .map((q) => ({
-      key: q.symbol,
-      group: q.category === 'commodity' ? 'Commodity' : 'FX',
-      name: q.name,
-      price: q.price,
-      changePct: q.changePct,
-      footnote: q.currency,
+  const equityTiles: Tile[] = equities
+    .filter((e) => sectorFilter === 'All' || e.sector === sectorFilter)
+    .map((e) => ({
+      key: e.symbol,
+      group: e.sector,
+      name: e.name,
+      price: e.price,
+      changePct: e.changePct,
+      footnote: e.symbol,
+      href: `/stocks/${e.symbol}`,
     }))
-
-  const cryptoTiles: Tile[] = coins.map((c) => ({
-    key: c.symbol,
-    group: c.symbol,
-    name: c.name,
-    price: c.price,
-    changePct: c.changePct,
-    footnote: formatMarketCap(c.marketCap),
-  }))
 
   const byTab: Record<Tab, Tile[]> = {
-    indices: indexTiles,
-    commodities: commodityTiles,
-    crypto: cryptoTiles,
+    equities: equityTiles,
+    india: tilesFor((q) => q.category === 'domestic', () => 'India'),
+    world: tilesFor((q) => q.category === 'international', () => 'Global'),
+    commodities: tilesFor((q) => q.category === 'commodity', () => 'Commodity'),
+    currencies: tilesFor((q) => q.category === 'currency', () => 'FX'),
+    crypto: coins.map((c) => ({
+      key: c.symbol,
+      group: c.symbol,
+      name: c.name,
+      price: c.price,
+      changePct: c.changePct,
+      footnote: formatMarketCap(c.marketCap),
+    })),
   }
   const active = byTab[tab]
+
+  // Sector filter chips, only meaningful on the equities tab.
+  const equitySectors = ['All', ...Array.from(new Set(equities.map((e) => e.sector))).sort()]
+
+  // A breadth count says more about a session than any single tile.
+  const advancing = active.filter((t) => t.changePct > 0).length
+  const declining = active.filter((t) => t.changePct < 0).length
 
   return (
     <AppShell userEmail={user?.email} onLogout={handleLogout}>
@@ -181,16 +222,26 @@ export default function Markets() {
           <p className="text-xs font-mono uppercase tracking-widest text-accent mb-2">Global markets</p>
           <h1 className="text-2xl sm:text-3xl font-bold text-ink mb-1">Live Market Heatmap</h1>
           <p className="text-ink-muted text-sm">
-            Indian and world indices, commodities, currencies and crypto — colour-scaled by
+            Every NIFTY 50 stock, Indian sector indices, the major exchanges of every region,
+            the commodity complex, INR crosses and the top 50 cryptocurrencies — colour-scaled by
             today&apos;s move. Fetched live from keyless public feeds, refreshed every minute.
           </p>
         </div>
-        {fetchedAt && (
-          <span className="flex items-center gap-2 flex-shrink-0 text-[10px] font-mono text-ink-faint">
-            <span className="live-dot" />
-            Updated {new Date(fetchedAt).toLocaleTimeString('en-IN', { hour12: false })}
-          </span>
-        )}
+        <div className="flex flex-col items-start sm:items-end gap-1.5 flex-shrink-0">
+          {fetchedAt && (
+            <span className="flex items-center gap-2 text-[10px] font-mono text-ink-faint">
+              <span className="live-dot" />
+              Updated {new Date(fetchedAt).toLocaleTimeString('en-IN', { hour12: false })}
+            </span>
+          )}
+          {!loading && active.length > 0 && (
+            <span className="text-[11px] font-mono mono-tabular">
+              <span className="text-buy">{advancing} advancing</span>
+              <span className="text-ink-faint"> · </span>
+              <span className="text-avoid">{declining} declining</span>
+            </span>
+          )}
+        </div>
       </div>
 
       {errors.map((message) => (
@@ -224,6 +275,24 @@ export default function Markets() {
         ))}
       </div>
 
+      {tab === 'equities' && equitySectors.length > 1 && (
+        <div className="flex gap-2 mb-6 overflow-x-auto pb-1">
+          {equitySectors.map((sector) => (
+            <button
+              key={sector}
+              onClick={() => setSectorFilter(sector)}
+              className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition ${
+                sectorFilter === sector
+                  ? 'bg-surface-2 text-accent border-accent-dim'
+                  : 'bg-surface text-ink-muted border-border hover:border-accent-dim'
+              }`}
+            >
+              {sector}
+            </button>
+          ))}
+        </div>
+      )}
+
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           {Array.from({ length: 8 }).map((_, i) => (
@@ -240,11 +309,16 @@ export default function Markets() {
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {active.map((tile, idx) => (
-            <div
+          {active.map((tile, idx) => {
+            // Equity tiles are links to the stock's own page; index and
+            // commodity tiles have nowhere more specific to go.
+            const Tag = (tile.href ? 'a' : 'div') as any
+            return (
+            <Tag
               key={tile.key}
+              {...(tile.href ? { href: tile.href } : {})}
               style={{ ...heatStyle(tile.changePct, tab), animationDelay: `${Math.min(idx * 30, 300)}ms` }}
-              className="tile-hover fade-in rounded-xl border p-4"
+              className="tile-hover fade-in rounded-xl border p-4 block"
             >
               <p className="font-mono text-[10px] uppercase tracking-wide text-ink-faint mb-1">
                 {tile.group}
@@ -269,8 +343,9 @@ export default function Markets() {
               {tile.footnote && (
                 <p className="text-[10px] text-ink-faint mt-1 font-mono">{tile.footnote}</p>
               )}
-            </div>
-          ))}
+            </Tag>
+            )
+          })}
         </div>
       )}
     </AppShell>

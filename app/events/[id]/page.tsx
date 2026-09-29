@@ -11,6 +11,7 @@ import ReturnSparkline from '@/components/charts/ReturnSparkline'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import ScoreChip from '@/components/ui/ScoreChip'
 import NewsImpactPanel from '@/components/NewsImpactPanel'
+import ImpactBreakdown from '@/components/ImpactBreakdown'
 import type { User } from '@supabase/supabase-js'
 import type { MarketQuote } from '@/lib/market/yahooFinance'
 
@@ -343,6 +344,13 @@ export default function EventDetails({ params }: { params: { id: string } }) {
           />
         </div>
       )}
+
+      {/* Who this event helps and who it hurts, through the same mechanism. */}
+      <ImpactBreakdown
+        title={analysis.event_title}
+        sectors={analysis.affected_sectors || []}
+        companies={stocks.slice(0, 6).map((stock) => ({ symbol: stock.stock_symbol }))}
+      />
 
       {/* Global Market Context */}
       {marketContext.length > 0 && (
