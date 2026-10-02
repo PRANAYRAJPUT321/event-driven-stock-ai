@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { analyseImpact } from '@/lib/ai/impactAnalyzer'
 import { NIFTY_50, equitiesForSectors } from '@/lib/market/indianEquities'
+import { classifyEventByRules } from '@/lib/ai/ruleClassifier'
 
 /**
  * Two-sided impact read for one headline.
@@ -21,9 +22,19 @@ export async function POST(request: NextRequest) {
     }
 
     const description = typeof body?.description === 'string' ? body.description : ''
-    const sectors: string[] = Array.isArray(body?.sectors)
+    const suppliedSectors: string[] = Array.isArray(body?.sectors)
       ? body.sectors.filter((s: unknown) => typeof s === 'string' && s.trim() !== '')
       : []
+
+    // A caller that names no sectors is not asking about every sector; it is
+    // leaving the read to us. Deriving them from the headline keeps the
+    // company list tied to the event — without this the empty list used to
+    // fall through to the first six names of the index, so a crude-oil story
+    // came back reporting an impact on six banks.
+    const sectors: string[] =
+      suppliedSectors.length > 0
+        ? suppliedSectors
+        : classifyEventByRules(`${title} ${description}`.trim()).affected_sectors ?? []
 
     // Companies may be named explicitly, or derived from the affected sectors
     // so a headline about "Banking" still produces a per-company read.

@@ -16,14 +16,19 @@ const REVALIDATE_SECONDS = 60
 
 export async function GET() {
   try {
-    const { quotes, failed, fetchedAt } = await fetchEquityQuotes(NIFTY_50, REVALIDATE_SECONDS)
+    const { quotes, failed, failureReason, fetchedAt } = await fetchEquityQuotes(
+      NIFTY_50,
+      REVALIDATE_SECONDS
+    )
 
     if (quotes.length === 0) {
       return NextResponse.json(
         {
           error:
             'Yahoo Finance returned no usable quotes for any NIFTY 50 constituent. ' +
-            'This is usually upstream rate limiting and normally clears on its own.',
+            (failureReason
+              ? `The upstream said: ${failureReason}`
+              : 'This is usually upstream rate limiting and normally clears on its own.'),
           failed,
         },
         { status: 502 }

@@ -53,10 +53,42 @@ export function calculateCompositeScore(
   return Math.min(100, Math.max(0, Math.round(score)))
 }
 
+export type Recommendation = 'BUY' | 'HOLD' | 'AVOID' | 'UNRATED'
+
 export function scoreToRecommendation(score: number): 'BUY' | 'HOLD' | 'AVOID' {
   if (score >= 75) return 'BUY'
   if (score >= 60) return 'HOLD'
   return 'AVOID'
+}
+
+/**
+ * The factors that say something about *this company* rather than about the
+ * event. Event impact and historical reaction are identical for every name in
+ * an affected sector, so a composite built from those alone ranks nothing and
+ * distinguishes nothing.
+ */
+export const COMPANY_SPECIFIC_FACTORS = [
+  'fundamentalStrength',
+  'valuation',
+  'technicalCondition',
+  'riskScore',
+] as const
+
+/**
+ * A recommendation, but only when there is company evidence behind it.
+ *
+ * Scoring a stock purely off the event leaves every candidate on the same
+ * number — and because a bare event score usually lands below the HOLD line,
+ * that number came out as a confident "AVOID" on companies the app had no
+ * data for at all. Absence of data is not a negative verdict, so it now gets
+ * its own state rather than borrowing the worst one.
+ */
+export function recommendationFromComposite(result: CompositeResult): Recommendation {
+  const hasCompanyEvidence = result.contributions.some((c) =>
+    (COMPANY_SPECIFIC_FACTORS as readonly string[]).includes(c.factor)
+  )
+  if (!hasCompanyEvidence) return 'UNRATED'
+  return scoreToRecommendation(result.score)
 }
 
 export function scoreToOpportunityLevel(score: number): string {

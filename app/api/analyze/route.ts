@@ -7,7 +7,11 @@ import {
   getHistoricalReaction,
   historicalReturnToScore,
 } from '@/lib/market/historicalEngine'
-import { equitiesForSectors, type EquityConstituent } from '@/lib/market/indianEquities'
+import {
+  equitiesForSectors,
+  sectorsWithoutConstituents,
+  type EquityConstituent,
+} from '@/lib/market/indianEquities'
 import {
   calculateCompositeFromAvailable,
   riskScoreToLevel,
@@ -15,7 +19,7 @@ import {
   scoreFundamental,
   scoreRisk,
   scoreTechnical,
-  scoreToRecommendation,
+  recommendationFromComposite,
   scoreValuation,
 } from '@/lib/scoring/scoreCalculator'
 
@@ -112,6 +116,10 @@ export async function POST(request: NextRequest) {
     // from Yahoo, where a wrong ticker is simply a 404.
     const sectors = classification.affected_sectors ?? []
     const candidates: EquityConstituent[] = equitiesForSectors(sectors, MAX_STOCKS_ANALYZED)
+    // Named by the classification but absent from this universe — reported so
+    // the page can say "no NIFTY 50 name is exposed to Aviation" rather than
+    // quietly showing an unrelated company in its place.
+    const unmatchedSectors = sectorsWithoutConstituents(sectors)
 
     // Map to database ids where the table has them, so a signed-in analysis
     // can still be watchlisted and stored against a real row.
@@ -180,7 +188,7 @@ export async function POST(request: NextRequest) {
         compositeScore: composite.score,
         coverage: composite.coverage,
         excludedFactors: composite.excluded,
-        recommendation: scoreToRecommendation(composite.score),
+        recommendation: recommendationFromComposite(composite),
       }
     })
 
@@ -286,6 +294,7 @@ export async function POST(request: NextRequest) {
         historical,
         counterArgument,
         eventImpactScore,
+        unmatchedSectors,
         stocks: stockResults.map((r) => ({
           symbol: r.stock.symbol,
           name: r.stock.name,

@@ -18,6 +18,8 @@ const MODULES = [
   'lib/ai/impactAnalyzer.ts',
   'lib/news/rssNews.ts',
   'lib/market/yahooFinance.ts',
+  'lib/market/indianEquities.ts',
+  'lib/scoring/scoreCalculator.ts',
 ]
 
 // Emitted inside the project so Node resolves the project's node_modules.
@@ -46,6 +48,10 @@ const { classifyEventByRules, categorizeNewsByRules, buildCounterArgumentFromRul
 const { parseRssFeed } = require(path.join(out, 'news/rssNews.js'))
 const { parseChart } = require(path.join(out, 'market/yahooFinance.js'))
 const { analyseImpact } = require(path.join(out, 'ai/impactAnalyzer.js'))
+const { equitiesForSectors, sectorsWithoutConstituents } =
+  require(path.join(out, 'market/indianEquities.js'))
+const { calculateCompositeFromAvailable, recommendationFromComposite } =
+  require(path.join(out, 'scoring/scoreCalculator.js'))
 
 let failures = 0
 let checks = 0
@@ -323,6 +329,72 @@ check('company impact carries the company name', withCompanies.companyImpacts[0]
 checkThat('company impact has both sides',
   withCompanies.companyImpacts[0].positives.length > 0 &&
     withCompanies.companyImpacts[0].negatives.length > 0)
+
+section('evidence-gated recommendations')
+
+const eventOnly = calculateCompositeFromAvailable({
+  eventImpact: 20,
+  historicalReaction: 40,
+  fundamentalStrength: null,
+  valuation: null,
+  technicalCondition: null,
+  riskScore: null,
+})
+check('a composite with no company factor is UNRATED, not AVOID',
+  recommendationFromComposite(eventOnly), 'UNRATED')
+
+const noData = calculateCompositeFromAvailable({
+  eventImpact: null,
+  historicalReaction: null,
+  fundamentalStrength: null,
+  valuation: null,
+  technicalCondition: null,
+  riskScore: null,
+})
+check('a composite with no data at all is UNRATED', recommendationFromComposite(noData), 'UNRATED')
+
+const oneFactor = calculateCompositeFromAvailable({
+  eventImpact: 20,
+  historicalReaction: 40,
+  fundamentalStrength: 90,
+  valuation: null,
+  technicalCondition: null,
+  riskScore: null,
+})
+checkThat('one company factor is enough to rate',
+  recommendationFromComposite(oneFactor) !== 'UNRATED')
+
+const wellEvidenced = calculateCompositeFromAvailable({
+  eventImpact: 90, historicalReaction: 85, fundamentalStrength: 88,
+  valuation: 80, technicalCondition: 82, riskScore: 78,
+})
+check('a well-evidenced high score still reads BUY',
+  recommendationFromComposite(wellEvidenced), 'BUY')
+
+section('sector-to-company mapping')
+
+check('an empty sector list maps to no companies', equitiesForSectors([], 6), [])
+check('a sector with no constituent maps to no companies', equitiesForSectors(['Aviation'], 6), [])
+checkThat('a real sector still maps to its constituents',
+  equitiesForSectors(['Banking'], 6).every((e) => e.sector === 'Banking'))
+checkThat('banks are not substituted for an energy event',
+  equitiesForSectors(['Energy'], 6).every((e) => e.sector === 'Energy'))
+check('sectors with no constituent are reported',
+  sectorsWithoutConstituents(['Banking', 'Aviation', 'Realty']), ['Aviation', 'Realty'])
+
+section('counter-argument wording when nothing was scored')
+
+const blind = buildCounterArgumentFromRules({
+  stockSymbol: 'HDFCBANK', compositeScore: 29,
+  fundamentalScore: null, valuationScore: null, technicalScore: null, riskScore: null,
+  eventDirection: 'NEGATIVE', eventMagnitude: 76,
+})
+checkThat('bear case does not claim components scored well',
+  !blind.bearCase.includes('No component scores poorly'))
+checkThat('bear case names the missing evidence',
+  blind.bearCase.includes('no fundamental, valuation, technical or risk input'))
+checkThat('bull case does not imply components were compared',
+  !blind.bullCase.includes('No individual component scores strongly'))
 
 console.log(
   failures === 0

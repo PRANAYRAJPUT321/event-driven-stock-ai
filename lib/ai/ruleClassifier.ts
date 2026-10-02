@@ -640,6 +640,10 @@ export function buildCounterArgumentFromRules(input: DecisionInput): DecisionOut
   add('technicals', technicalScore, 'price is above its moving averages with supportive momentum', 'price momentum is against the thesis')
   add('risk', riskScore, 'leverage and volatility are contained', 'leverage or volatility is elevated')
 
+  // Every company-level factor missing is a different situation from every
+  // one of them scoring mid-range, and the two used to read identically.
+  const nothingScored = strengths.length === 0 && weaknesses.length === 0 && unavailable.length === 4
+
   const directionPhrase =
     eventDirection === 'POSITIVE' ? 'a tailwind' : eventDirection === 'NEGATIVE' ? 'a headwind' : 'directionally neutral'
 
@@ -654,11 +658,15 @@ export function buildCounterArgumentFromRules(input: DecisionInput): DecisionOut
       `at magnitude ${eventMagnitude}/100. ` +
       (strengths.length > 0
         ? `The supporting components are ${strengths.join('; ')}.`
-        : 'No individual component scores strongly here, so the case rests on the event rather than on the company.'),
+        : nothingScored
+          ? 'No company-level component could be scored at all, so there is no company-specific case here — only the event read.'
+          : 'No individual component scores strongly here, so the case rests on the event rather than on the company.'),
     bearCase:
       (weaknesses.length > 0
         ? `The case breaks where ${weaknesses.join('; ')}. Any of those can absorb the event’s benefit before it reaches shareholders.`
-        : `No component scores poorly, which is itself the risk: with nothing obviously cheap or mispriced, much of the event may already be in the price, and the ${eventMagnitude}/100 magnitude may be the market’s estimate rather than an edge.`) +
+        : nothingScored
+          ? 'The risk is the missing evidence itself: with no fundamental, valuation, technical or risk input sourced, nothing here distinguishes this company from any other name in the same sector.'
+          : `No component scores poorly, which is itself the risk: with nothing obviously cheap or mispriced, much of the event may already be in the price, and the ${eventMagnitude}/100 magnitude may be the market’s estimate rather than an edge.`) +
       (unavailable.length > 0
         ? ` Note also that ${unavailable.join(' and ')} could not be sourced for this stock, so the composite rests on less evidence than a full score would.`
         : ''),
@@ -669,7 +677,9 @@ export function buildCounterArgumentFromRules(input: DecisionInput): DecisionOut
           ? `Technicals at ${technicalScore}/100 disagree with the thesis — price is not yet behaving as though the event helps, which either means the market disputes the mechanism or it has not reacted yet.`
           : riskScore !== null && riskScore <= 45
             ? `Risk at ${riskScore}/100 disagrees with the thesis — the balance sheet or volatility profile makes this name a poor vehicle for the view even if the view is right.`
-            : 'No component contradicts the thesis outright; the strongest counterpoint is that a well-scored, well-known name is where an event is most likely to already be priced in.',
+            : nothingScored
+              ? 'Nothing can contradict the thesis here, because no company-level component was scored — which is itself the weakest possible footing for a view.'
+              : 'No component contradicts the thesis outright; the strongest counterpoint is that a well-scored, well-known name is where an event is most likely to already be priced in.',
     keyRisks: [
       eventDirection === 'NEGATIVE'
         ? 'The event may prove milder or shorter-lived than the magnitude implies, making the sell-off the opportunity rather than the risk.'

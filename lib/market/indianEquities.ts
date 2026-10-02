@@ -95,12 +95,24 @@ export const EQUITY_SECTORS: string[] = Array.from(
   new Set(NIFTY_50.map((s) => s.sector))
 ).sort()
 
+/**
+ * The constituents that actually sit in the given sectors.
+ *
+ * This used to fall back to the first `limit` names of the index whenever the
+ * sector list was empty or matched nothing — which meant a crude-oil event,
+ * whose affected sectors are Aviation and Energy, came back as six banks, and
+ * those banks were then shown with the event's impact attached to them. An
+ * empty answer is the correct one: the caller can say that no constituent is
+ * exposed, which is true, instead of naming companies that are not.
+ */
 export function equitiesForSectors(sectors: string[], limit: number): EquityConstituent[] {
-  if (sectors.length === 0) return NIFTY_50.slice(0, limit)
-  const matched = NIFTY_50.filter((s) => sectors.includes(s.sector))
-  // A sector with no constituent would otherwise produce an analysis with
-  // nothing in it, so fall back to the broad index rather than an empty list.
-  return (matched.length > 0 ? matched : NIFTY_50).slice(0, limit)
+  if (sectors.length === 0) return []
+  return NIFTY_50.filter((s) => sectors.includes(s.sector)).slice(0, limit)
+}
+
+/** Affected sectors that no constituent of this universe belongs to. */
+export function sectorsWithoutConstituents(sectors: string[]): string[] {
+  return sectors.filter((sector) => !NIFTY_50.some((s) => s.sector === sector))
 }
 
 export function findEquity(symbol: string): EquityConstituent | undefined {

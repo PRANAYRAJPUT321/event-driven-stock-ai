@@ -32,17 +32,21 @@ export interface AnalysisPayload {
     keyRisks: string[]
     finalReasoning: string
   } | null
+  unmatchedSectors?: string[]
   stocks: {
     symbol: string
     name: string
     sector: string
-    fundamentalScore: number
-    valuationScore: number
-    technicalScore: number
-    riskScore: number
+    fundamentalScore: number | null
+    valuationScore: number | null
+    technicalScore: number | null
+    riskScore: number | null
     riskLevel: string
     opportunityScore: number
     recommendation: string
+    /** Share of the scoring weight that had real data behind it, 0-1. */
+    coverage?: number
+    excludedFactors?: string[]
   }[]
 }
 
@@ -57,6 +61,11 @@ export interface AnalysisPayload {
 export default function AnalysisResult({ payload }: { payload: AnalysisPayload }) {
   const { classification, historical, counterArgument, stocks } = payload
   const top = stocks[0]
+  // A score built only from the event is the same number for every name in the
+  // sector, so it ranks nothing. Say so rather than letting the badge imply a
+  // company-level verdict that was never computed.
+  const unrated = stocks.filter((s) => s.recommendation === 'UNRATED').length
+  const unmatched = payload.unmatchedSectors ?? []
 
   return (
     <div className="fade-in">
@@ -162,6 +171,23 @@ export default function AnalysisResult({ payload }: { payload: AnalysisPayload }
 
       <div className="panel p-7 mb-6">
         <h2 className="text-sm font-bold text-ink mb-4">Scored Stocks ({stocks.length})</h2>
+
+        {unrated > 0 && (
+          <p className="text-xs text-hold border border-hold-dim bg-hold-dim rounded-lg px-3 py-2 mb-4">
+            {unrated === stocks.length ? 'No company-level data' : `${unrated} of these`} could be
+            sourced right now, so {unrated === stocks.length ? 'these names are' : 'they are'} shown
+            unrated: the event score alone is identical for every company in the sector and cannot
+            tell them apart.
+          </p>
+        )}
+
+        {unmatched.length > 0 && (
+          <p className="text-xs text-ink-muted border border-border rounded-lg px-3 py-2 mb-4">
+            No NIFTY 50 constituent belongs to {unmatched.join(', ')}, so no company from{' '}
+            {unmatched.length > 1 ? 'those sectors' : 'that sector'} could be scored.
+          </p>
+        )}
+
         <div className="space-y-2">
           {stocks.map((stock) => (
             <Link
@@ -182,9 +208,16 @@ export default function AnalysisResult({ payload }: { payload: AnalysisPayload }
                 <ScoreChip score={stock.riskScore} size="sm" />
               </div>
               <div className="flex items-center gap-3 ml-auto">
-                <span className="mono-tabular text-lg font-bold text-ink">
-                  {stock.opportunityScore}
-                </span>
+                <div className="text-right">
+                  <span className="mono-tabular text-lg font-bold text-ink">
+                    {stock.opportunityScore}
+                  </span>
+                  {typeof stock.coverage === 'number' && stock.coverage < 1 && (
+                    <p className="text-[10px] text-ink-faint mono-tabular">
+                      {Math.round(stock.coverage * 100)}% evidence
+                    </p>
+                  )}
+                </div>
                 <RecommendationBadge rec={stock.recommendation} size="sm" />
               </div>
             </Link>

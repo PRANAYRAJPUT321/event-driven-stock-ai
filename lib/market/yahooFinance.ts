@@ -274,6 +274,13 @@ export interface MarketBarData {
   quotes: MarketQuote[]
   /** Symbols that failed, so the UI/logs can show partial-data honestly. */
   failed: string[]
+  /**
+   * Why the first failure happened. Without this the caller can only guess at
+   * the cause, and the guess it used to print — "usually upstream rate
+   * limiting" — was wrong whenever the real answer was a blocked host or a
+   * DNS failure, which sent people looking in the wrong place.
+   */
+  failureReason?: string
   fetchedAt: string
 }
 
@@ -290,12 +297,16 @@ export async function fetchMarketBar(
 
   const quotes: MarketQuote[] = []
   const failed: string[] = []
+  let failureReason: string | undefined
   settled.forEach((outcome, i) => {
     if (outcome.status === 'fulfilled') quotes.push(outcome.value)
-    else failed.push(symbols[i].symbol)
+    else {
+      failed.push(symbols[i].symbol)
+      failureReason ??= String(outcome.reason?.message ?? outcome.reason)
+    }
   })
 
-  return { quotes, failed, fetchedAt: new Date().toISOString() }
+  return { quotes, failed, failureReason, fetchedAt: new Date().toISOString() }
 }
 
 /**
@@ -308,7 +319,12 @@ export async function fetchMarketBar(
 export async function fetchEquityQuotes(
   constituents: { symbol: string; name: string; sector: string }[],
   revalidateSeconds = 60
-): Promise<{ quotes: (MarketQuote & { sector: string })[]; failed: string[]; fetchedAt: string }> {
+): Promise<{
+  quotes: (MarketQuote & { sector: string })[]
+  failed: string[]
+  failureReason?: string
+  fetchedAt: string
+}> {
   const settled = await Promise.allSettled(
     constituents.map((c) =>
       fetchOne(
@@ -322,6 +338,7 @@ export async function fetchEquityQuotes(
 
   const quotes: (MarketQuote & { sector: string })[] = []
   const failed: string[] = []
+  let failureReason: string | undefined
   settled.forEach((outcome, i) => {
     if (outcome.status === 'fulfilled') {
       quotes.push({
@@ -333,10 +350,11 @@ export async function fetchEquityQuotes(
       })
     } else {
       failed.push(constituents[i].symbol)
+      failureReason ??= String(outcome.reason?.message ?? outcome.reason)
     }
   })
 
-  return { quotes, failed, fetchedAt: new Date().toISOString() }
+  return { quotes, failed, failureReason, fetchedAt: new Date().toISOString() }
 }
 
 /** Single-symbol lookup for the stock profile page. Throws on failure. */

@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     // because the bar is read at a glance and the heatmap is read deliberately
     // — and because the wide set costs proportionally more upstream requests.
     const scope = new URL(request.url).searchParams.get('scope')
-    const { quotes, failed, fetchedAt } = await fetchMarketBar(
+    const { quotes, failed, failureReason, fetchedAt } = await fetchMarketBar(
       REVALIDATE_SECONDS,
       scope === 'full' ? HEATMAP_SYMBOLS : undefined
     )
@@ -32,7 +32,9 @@ export async function GET(request: Request) {
         {
           error:
             'Yahoo Finance returned no usable quotes for any tracked symbol. ' +
-            'This is usually upstream rate limiting — it normally clears on its own.',
+            (failureReason
+              ? `The upstream said: ${failureReason}`
+              : 'This is usually upstream rate limiting — it normally clears on its own.'),
           failed,
         },
         { status: 502 }
