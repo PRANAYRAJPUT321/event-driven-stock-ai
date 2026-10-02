@@ -1,6 +1,22 @@
+<div align="center">
+
 # 📊 Event-Driven Stock Market Intelligence Platform
 
-An AI-powered investment analysis platform for the Indian equity market that transforms financial news and economic events into actionable, explainable investment recommendations.
+**Turn financial news into explainable investment insights for the Indian equity market.**
+
+![Next.js](https://img.shields.io/badge/Next.js_14-000000?style=flat-square&logo=nextdotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?style=flat-square&logo=supabase&logoColor=white)
+![Claude](https://img.shields.io/badge/Claude_AI-D97757?style=flat-square&logo=anthropic&logoColor=white)
+![Vercel](https://img.shields.io/badge/Vercel-000000?style=flat-square&logo=vercel&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-64748b?style=flat-square)
+
+[Overview](#-project-overview) · [Features](#-key-features) · [Getting Started](#-getting-started) · [Architecture](#-architecture-flow) · [API](#-api-endpoints) · [Roadmap](#-roadmap) · [Authors](#-authors)
+
+</div>
+
+---
 
 ## 🎯 Project Overview
 
@@ -33,36 +49,13 @@ Unlike generic stock recommendation systems, this platform is **event-driven** -
 - **Market data:** Yahoo Finance + CoinGecko (keyless public endpoints)
 - **News:** Google News and Yahoo Finance RSS (keyless)
 
-## 📋 Session Progress
+## 🏆 Highlights
 
-### Session 1: Foundation ✅
-- [x] Next.js + TypeScript + Tailwind setup
-- [x] Supabase project configured
-- [x] Authentication (signup/login/logout)
-- [x] Database schema with RLS policies
-- [x] Dashboard UI
-- [x] Analyze event page
-- [x] Event classification API
-- [x] Initial commit to GitHub
-
-### Sessions 2-5: Core Features ✅
-- [x] Stock analysis engines (fundamentals, valuation, technical, risk)
-- [x] Event opportunity scoring
-- [x] BUY/HOLD/AVOID decision logic
-- [x] Counter-argument generation
-- [x] Results display with visualizations
-- [x] Saved analyses & history
-- [x] Watchlist functionality
-- [x] News feed integration
-- [x] Testing & deployment
-
-### Sessions 6-8: Rebuild ✅
-- [x] Every data source replaced with a keyless public endpoint
-- [x] Deterministic rule engine, with the language model as an optional layer
-- [x] All simulated figures removed; unsourced values reported as missing
-- [x] Two-sided impact analysis — winners and losers from the same event
-- [x] Neon light and dark themes, set before first paint
-- [x] Full offline test harness (101 checks, no network or keys required)
+- **Real data only** — every price, fundamental and headline comes from a live, keyless public source; values that can't be sourced are reported as missing, never simulated
+- **AI optional, never required** — a deterministic rule engine produces the full analysis on its own; Claude adds narrative depth when available
+- **Two-sided impact** — every event shows both the likely winners and the likely losers
+- **Works without a database** — analysis, markets and news run with no setup; Supabase only adds accounts and saved data
+- **Tested offline** — 101 checks that run with no network and no API keys
 
 ## 🚀 Getting Started
 
@@ -231,12 +224,16 @@ MIT
 
 ## 👤 Authors
 
-Pranay and Pranil — academic project for the subject *Artificial
-Intelligence in Finance*.
+Built by **[Pranay Dadghaye](https://github.com/PRANAYRAJPUT321)** and **Pranil** as an academic project for the subject *Artificial Intelligence in Finance*, PGDM Finance at **Imperial School of Banking and Management Studies**.
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Pranay_Dadghaye-0A66C2?style=flat-square&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/pranay-dadghaye-ba89a7278)
+[![Email](https://img.shields.io/badge/Email-pranaydadghaye%40gmail.com-D14836?style=flat-square&logo=gmail&logoColor=white)](mailto:pranaydadghaye@gmail.com)
+
+> **Disclaimer:** This project is for educational purposes only and is not investment advice. Always do your own research before investing.
 
 ## 📞 Support
 
-For issues or questions, please create a GitHub issue.
+For issues or questions, please [open a GitHub issue](https://github.com/PRANAYRAJPUT321/event-driven-stock-ai/issues). Development notes from each build session are in [`docs/dev-log/`](docs/dev-log/).
 
 ---
 
