@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, getSessionUser } from '@/lib/supabase/client'
 import AppShell from '@/components/layout/AppShell'
 import type { User } from '@supabase/supabase-js'
 
@@ -32,11 +32,31 @@ interface Quote {
     sell: number | null
     strongSell: number | null
   }
+  /**
+   * Set when Yahoo's fundamentals/analyst endpoint could not be reached. It
+   * needs a session cookie and crumb and can refuse without notice; price and
+   * history do not. The page says so rather than showing empty cells.
+   */
+  fundamentalsError: string | null
 }
 
 interface HistoryPoint {
   date: string
   close: number
+}
+
+/**
+ * Computed from the price series by /api/stocks/history. These are always
+ * available when the chart is, which matters because Yahoo's fundamentals
+ * endpoint is the flaky tier — see `fundamentalsError` below.
+ */
+interface DerivedStats {
+  periodHigh: number | null
+  periodLow: number | null
+  sma50: number | null
+  sma200: number | null
+  volatilityPct: number | null
+  changePctInPeriod: number | null
 }
 
 const QUICK_SYMBOLS = ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK']
@@ -63,6 +83,7 @@ export default function StockProfile({ params }: { params: { symbol: string } })
   const [user, setUser] = useState<User | null>(null)
   const [quote, setQuote] = useState<Quote | null>(null)
   const [history, setHistory] = useState<HistoryPoint[]>([])
+  const [stats, setStats] = useState<DerivedStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [stockId, setStockId] = useState<string | null>(null)
@@ -77,22 +98,33 @@ export default function StockProfile({ params }: { params: { symbol: string } })
       setLoading(true)
       setError('')
 
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/auth/login')
-        return
-      }
+      // No auth guard: price, chart, statistics, fundamentals and the analyst
+      // view all come from Yahoo, so this page is useful signed out and while
+      // the database is unreachable. The session only decides whether the
+      // watchlist button can be offered.
+      const { user } = await getSessionUser()
       setUser(user)
 
       // Look up whether this symbol exists in the scored universe, so we
       // know whether "Add to Watchlist" is possible (watchlists FK requires
       // a real stock_id — this profile page also works for tickers outside
-      // that seeded set, since Yahoo Finance isn't limited to it).
-      const [{ data: stockRow }, { data: watchRow }] = await Promise.all([
-        supabase.from('stocks').select('id').eq('symbol', symbol).maybeSingle(),
-        Promise.resolve({ data: null as any }),
-      ])
-      if (stockRow) {
+      // that seeded set, since Yahoo Finance isn't limited to it). Wrapped
+      // because a paused database must not stop the Yahoo data below from
+      // loading.
+      let stockRow: { id: string } | null = null
+      if (user) {
+        try {
+          const { data } = await supabase
+            .from('stocks')
+            .select('id')
+            .eq('symbol', symbol)
+            .maybeSingle()
+          stockRow = data
+        } catch {
+          // Leave stockRow null — the watchlist button is simply not offered.
+        }
+      }
+      if (stockRow && user) {
         setStockId(stockRow.id)
         const { data: existingWatch } = await supabase
           .from('watchlists')
@@ -107,8 +139,8 @@ export default function StockProfile({ params }: { params: { symbol: string } })
 
       try {
         const [quoteRes, historyRes] = await Promise.all([
-          fetch(`/api/py/stock-quote?symbol=${encodeURIComponent(symbol)}`),
-          fetch(`/api/py/stock-history?symbol=${encodeURIComponent(symbol)}&range=6mo&interval=1d`),
+          fetch(`/api/stocks/quote?symbol=${encodeURIComponent(symbol)}`),
+          fetch(`/api/stocks/history?symbol=${encodeURIComponent(symbol)}&range=6mo&interval=1d`),
         ])
         const quoteData = await quoteRes.json()
         const historyData = await historyRes.json()
@@ -118,6 +150,7 @@ export default function StockProfile({ params }: { params: { symbol: string } })
 
         setQuote(quoteData)
         setHistory(historyData.points || [])
+        setStats(historyData.stats || null)
       } catch (err: any) {
         setError(err.message || 'Failed to load live stock data')
       } finally {
@@ -164,7 +197,7 @@ export default function StockProfile({ params }: { params: { symbol: string } })
           />
           <button
             type="submit"
-            className="bg-accent hover:bg-accent-bright text-[#0a0d14] font-semibold px-4 py-2 rounded-lg text-sm transition"
+            className="bg-accent hover:bg-accent-bright text-on-accent font-semibold px-4 py-2 rounded-lg text-sm transition"
           >
             Go
           </button>
@@ -178,7 +211,7 @@ export default function StockProfile({ params }: { params: { symbol: string } })
             onClick={() => router.push(`/stocks/${s}`)}
             className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium border transition ${
               s === symbol
-                ? 'bg-accent text-[#0a0d14] border-accent'
+                ? 'bg-accent text-on-accent border-accent'
                 : 'bg-surface text-ink-muted border-border hover:border-border-bright'
             }`}
           >
@@ -212,7 +245,7 @@ export default function StockProfile({ params }: { params: { symbol: string } })
                 </p>
                 <p className={`mono-tabular text-lg font-semibold mt-1 ${(quote.changePct ?? 0) >= 0 ? 'text-buy' : 'text-avoid'}`}>
                   {(quote.changePct ?? 0) >= 0 ? '+' : ''}
-                  {((quote.changePct ?? 0) * 100).toFixed(2)}% today
+                  {(quote.changePct ?? 0).toFixed(2)}% today
                 </p>
               </div>
               {stockId ? (
@@ -277,9 +310,40 @@ export default function StockProfile({ params }: { params: { symbol: string } })
             </div>
           )}
 
+          {/* Price statistics — derived from the chart series, so these are
+              present whenever the chart is. */}
+          {stats && (
+            <div className="panel p-7 mb-6 fade-in">
+              <h2 className="text-sm font-bold text-ink mb-1">Price Statistics</h2>
+              <p className="text-xs text-ink-faint mb-4">
+                Computed from the 6-month daily close series shown above.
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                {[
+                  ['6M High', stats.periodHigh?.toLocaleString('en-IN') ?? '—'],
+                  ['6M Low', stats.periodLow?.toLocaleString('en-IN') ?? '—'],
+                  ['6M Change', stats.changePctInPeriod != null ? `${stats.changePctInPeriod >= 0 ? '+' : ''}${stats.changePctInPeriod.toFixed(2)}%` : '—'],
+                  ['50-Day SMA', stats.sma50?.toLocaleString('en-IN') ?? '—'],
+                  ['200-Day SMA', stats.sma200?.toLocaleString('en-IN') ?? '—'],
+                  ['Volatility (ann.)', stats.volatilityPct != null ? `${stats.volatilityPct.toFixed(1)}%` : '—'],
+                ].map(([label, value]) => (
+                  <div key={label} className="border border-border rounded-lg p-4 tile-hover">
+                    <p className="text-[10px] text-ink-faint uppercase tracking-wide mb-1">{label}</p>
+                    <p className="mono-tabular text-lg font-bold text-ink">{value}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Fundamentals */}
           <div className="panel p-7 mb-6 fade-in">
             <h2 className="text-sm font-bold text-ink mb-4">Fundamentals</h2>
+            {quote.fundamentalsError && (
+              <p className="text-xs text-hold bg-hold-dim border border-hold-dim rounded-lg px-3 py-2 mb-4">
+                {quote.fundamentalsError}
+              </p>
+            )}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {[
                 ['Market Cap', formatMarketCap(quote.marketCap)],
@@ -339,7 +403,11 @@ export default function StockProfile({ params }: { params: { symbol: string } })
                 </div>
               </>
             ) : (
-              <p className="text-ink-faint text-sm">No analyst coverage data available for this stock.</p>
+              <p className="text-ink-faint text-sm">
+                {quote.fundamentalsError
+                  ? 'Analyst data comes from the same Yahoo Finance endpoint as the fundamentals above, which is unavailable right now.'
+                  : 'No analyst coverage data available for this stock.'}
+              </p>
             )}
           </div>
         </>

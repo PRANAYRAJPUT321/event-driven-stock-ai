@@ -10,9 +10,9 @@ interface TransmissionFlowProps {
 }
 
 const DIRECTION_META: Record<string, { color: string; label: string }> = {
-  POSITIVE: { color: '#34d399', label: 'Tailwind' },
-  NEGATIVE: { color: '#f87171', label: 'Headwind' },
-  NEUTRAL: { color: '#fbbf24', label: 'Mixed signal' },
+  POSITIVE: { color: 'var(--buy)', label: 'Tailwind' },
+  NEGATIVE: { color: 'var(--avoid)', label: 'Headwind' },
+  NEUTRAL: { color: 'var(--hold)', label: 'Mixed signal' },
 }
 
 function Node({ title, sub, color, glow }: { title: string; sub: string; color: string; glow?: boolean }) {

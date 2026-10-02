@@ -22,13 +22,22 @@ export const metadata: Metadata = {
   },
 }
 
+// Runs before first paint, so the correct theme's tokens are in effect for the
+// very first frame — without this the dark default would flash on a light-mode
+// device (and vice versa) until React hydrated. Intentionally tiny, inline and
+// dependency-free; the key must match THEME_STORAGE_KEY in ThemeToggle.tsx.
+const THEME_INIT_SCRIPT = `(function(){try{var s=localStorage.getItem('pulse-theme');var t=(s==='light'||s==='dark')?s:(window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');document.documentElement.dataset.theme=t;}catch(e){document.documentElement.dataset.theme='dark';}})();`
+
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className={`${jetbrainsMono.variable} ${manrope.variable}`}>
+    <html lang="en" className={`${jetbrainsMono.variable} ${manrope.variable}`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="antialiased font-sans">
         {children}
       </body>

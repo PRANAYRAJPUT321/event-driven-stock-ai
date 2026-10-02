@@ -2,26 +2,144 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --bg: #0a0d14;
-  --bg-elevated: #0d1119;
-  --surface: #12151f;
-  --surface-2: #171b27;
-  --surface-hover: #1d2230;
-  --border: #242a38;
-  --border-bright: #333b4f;
-  --text: #e6e9f0;
-  --text-muted: #8a92a6;
-  --text-faint: #565d70;
-  --accent: #7c9cff;
-  --accent-dim: #3d4670;
-  --accent-bright: #a9beff;
-  --buy: #34d399;
-  --buy-dim: rgba(52, 211, 153, 0.12);
-  --hold: #fbbf24;
-  --hold-dim: rgba(251, 191, 36, 0.12);
-  --avoid: #f87171;
-  --avoid-dim: rgba(248, 113, 113, 0.12);
+/* ============================================================================
+   PULSE neon design system
+   ----------------------------------------------------------------------------
+   Every colour in the app is a token here, mapped to a Tailwind name in
+   tailwind.config.ts. That means the two themes below are the *only* place
+   colour is decided — re-defining a token re-skins all pages, no component
+   edits. `:root` is the dark theme (neon on near-black); `[data-theme="light"]`
+   restates the same hues darkened enough to stay legible on near-white, so
+   light mode still reads as neon rather than washed out.
+
+   The theme is set on <html data-theme="..."> by the inline script in
+   app/layout.tsx before first paint (no flash), so the media-query block is
+   only a no-JS fallback.
+   ========================================================================== */
+
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #04060d;
+  --bg-elevated: #070a15;
+  --surface: #0a0e1b;
+  --surface-2: #101527;
+  --surface-hover: #161d33;
+  --border: #1c2440;
+  --border-bright: #2c3a63;
+
+  --text: #e9f6ff;
+  --text-muted: #8fa2c0;
+  --text-faint: #5c6b8a;
+
+  /* electric cyan primary, magenta secondary */
+  --accent: #00e5ff;
+  --accent-dim: #0d4a5c;
+  --accent-bright: #7df9ff;
+  --accent-2: #ff3ec8;
+  --accent-2-dim: #5c1444;
+
+  --buy: #3dff9e;
+  --buy-dim: rgba(61, 255, 158, 0.13);
+  --hold: #ffcf3d;
+  --hold-dim: rgba(255, 207, 61, 0.13);
+  --avoid: #ff4d6d;
+  --avoid-dim: rgba(255, 77, 109, 0.13);
+
+  /* text colour that sits on top of a filled accent/signal surface */
+  --on-accent: #04060d;
+
+  --glow: rgba(0, 229, 255, 0.45);
+  --glow-2: rgba(255, 62, 200, 0.4);
+  --neon-blur: 12px;
+  --grid-line: rgba(0, 229, 255, 0.055);
+  --halo: rgba(0, 229, 255, 0.14);
+  --header-bg: rgba(4, 6, 13, 0.82);
+  --overlay-bg: rgba(2, 3, 8, 0.7);
+  --panel-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset, 0 22px 44px -22px rgba(0, 0, 0, 0.75);
+  --tile-shadow: 0 14px 28px -14px rgba(0, 0, 0, 0.75), 0 0 18px -8px var(--glow);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #f3f7fb;
+  --bg-elevated: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #eaf1f8;
+  --surface-hover: #dfe8f3;
+  --border: #d2dde9;
+  --border-bright: #aebfd4;
+
+  --text: #08111f;
+  --text-muted: #48586e;
+  --text-faint: #75859b;
+
+  /* Same neon family, darkened until each clears 4.5:1 on white. */
+  --accent: #00718c;
+  --accent-dim: #9ed6e4;
+  --accent-bright: #005166;
+  --accent-2: #b3007e;
+  --accent-2-dim: #f0b6dd;
+
+  --buy: #037a4d;
+  --buy-dim: rgba(3, 122, 77, 0.12);
+  --hold: #8a5800;
+  --hold-dim: rgba(138, 88, 0, 0.13);
+  --avoid: #c10f3b;
+  --avoid-dim: rgba(193, 15, 59, 0.11);
+
+  --on-accent: #ffffff;
+
+  --glow: rgba(0, 113, 140, 0.35);
+  --glow-2: rgba(179, 0, 126, 0.3);
+  --neon-blur: 7px;
+  --grid-line: rgba(0, 113, 140, 0.08);
+  --halo: rgba(0, 113, 140, 0.1);
+  --header-bg: rgba(243, 247, 251, 0.85);
+  --overlay-bg: rgba(8, 17, 31, 0.35);
+  --panel-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.8) inset, 0 16px 32px -20px rgba(8, 17, 31, 0.28);
+  --tile-shadow: 0 12px 24px -14px rgba(8, 17, 31, 0.3), 0 0 14px -8px var(--glow);
+}
+
+/* No-JS / script-blocked fallback only — the inline script always writes an
+   explicit data-theme, which takes precedence over this. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --bg: #f3f7fb;
+    --bg-elevated: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #eaf1f8;
+    --surface-hover: #dfe8f3;
+    --border: #d2dde9;
+    --border-bright: #aebfd4;
+    --text: #08111f;
+    --text-muted: #48586e;
+    --text-faint: #75859b;
+    --accent: #00718c;
+    --accent-dim: #9ed6e4;
+    --accent-bright: #005166;
+    --accent-2: #b3007e;
+    --accent-2-dim: #f0b6dd;
+    --buy: #037a4d;
+    --buy-dim: rgba(3, 122, 77, 0.12);
+    --hold: #8a5800;
+    --hold-dim: rgba(138, 88, 0, 0.13);
+    --avoid: #c10f3b;
+    --avoid-dim: rgba(193, 15, 59, 0.11);
+    --on-accent: #ffffff;
+    --glow: rgba(0, 113, 140, 0.35);
+    --glow-2: rgba(179, 0, 126, 0.3);
+    --neon-blur: 7px;
+    --grid-line: rgba(0, 113, 140, 0.08);
+    --halo: rgba(0, 113, 140, 0.1);
+    --header-bg: rgba(243, 247, 251, 0.85);
+    --overlay-bg: rgba(8, 17, 31, 0.35);
+    --panel-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.8) inset, 0 16px 32px -20px rgba(8, 17, 31, 0.28);
+    --tile-shadow: 0 12px 24px -14px rgba(8, 17, 31, 0.3), 0 0 14px -8px var(--glow);
+  }
 }
 
 * {
@@ -38,6 +156,8 @@ body {
   background: var(--bg);
   color: var(--text);
   font-feature-settings: 'ss01' 1, 'cv01' 1;
+  /* Theme flips shouldn't snap — but never animate on first paint. */
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 /* Custom scrollbar */
@@ -53,7 +173,7 @@ body {
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-faint);
+  background: var(--accent);
 }
 
 ::selection {
@@ -63,23 +183,31 @@ body {
 
 /* ---- shared surfaces ---- */
 
+/* min-width: 0 on both panel styles is load-bearing for responsiveness.
+   Panels are almost always grid or flex items, and those default to
+   min-width: auto — so a panel holding anything wide (a horizontally
+   scrolling transmission flow, a long unbroken symbol, a table) grows its
+   whole track past the viewport instead of letting the inner element
+   scroll. Fixing it here covers every page at once. */
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 16px;
+  min-width: 0;
 }
 
 .panel-elevated {
   background: var(--surface-2);
   border: 1px solid var(--border-bright);
   border-radius: 16px;
+  min-width: 0;
 }
 
 .grid-backdrop {
   background-color: var(--bg);
   background-image:
-    linear-gradient(rgba(230, 233, 240, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(230, 233, 240, 0.035) 1px, transparent 1px);
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
   background-size: 32px 32px;
   position: relative;
 }
@@ -88,7 +216,7 @@ body {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(124, 156, 255, 0.12), transparent);
+  background: radial-gradient(ellipse 80% 50% at 50% -10%, var(--halo), transparent);
   pointer-events: none;
 }
 
@@ -105,6 +233,30 @@ body {
   background: var(--buy);
   animation: pulseDot 1.8s ease-in-out infinite;
   box-shadow: 0 0 8px var(--buy);
+}
+
+/* ---- neon accents ----
+   Deliberately three small utilities rather than glow-everything: text for
+   headings/values, border for active/selected chrome, glow for the one focal
+   element on a panel. --neon-blur is smaller in light mode, where a wide
+   bloom on white just reads as blur. */
+.neon-text {
+  color: var(--accent);
+  text-shadow: 0 0 var(--neon-blur) var(--glow);
+}
+
+.neon-text-2 {
+  color: var(--accent-2);
+  text-shadow: 0 0 var(--neon-blur) var(--glow-2);
+}
+
+.neon-border {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-dim), 0 0 var(--neon-blur) -2px var(--glow);
+}
+
+.neon-glow {
+  box-shadow: 0 0 calc(var(--neon-blur) * 1.6) -4px var(--glow);
 }
 
 /* Animations */
@@ -146,14 +298,39 @@ body {
   animation-play-state: paused;
 }
 
+/* One-shot flash when a live value changes, so an updating ticker/quote is
+   visibly live without the whole row re-animating. */
+@keyframes flashUp {
+  from {
+    background-color: var(--buy-dim);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+@keyframes flashDown {
+  from {
+    background-color: var(--avoid-dim);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+.flash-up {
+  animation: flashUp 0.9s ease-out;
+}
+.flash-down {
+  animation: flashDown 0.9s ease-out;
+}
+
 .header-blur {
-  background: rgba(10, 13, 20, 0.85);
+  background: var(--header-bg);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
 
 .overlay-blur {
-  background: rgba(5, 7, 12, 0.65);
+  background: var(--overlay-bg);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
@@ -167,7 +344,8 @@ body {
 }
 .tile-hover:hover {
   transform: translateY(-2px);
-  box-shadow: 0 12px 24px -12px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--tile-shadow);
+  border-color: var(--accent-dim);
 }
 .tile-hover:active {
   transform: translateY(0) scale(0.98);
@@ -194,8 +372,14 @@ body {
   .fade-in,
   .animate-marquee,
   .live-dot,
-  .skeleton {
+  .skeleton,
+  .flash-up,
+  .flash-down,
+  body {
     animation: none !important;
     transition: none !important;
+  }
+  html {
+    scroll-behavior: auto;
   }
 }

@@ -1,32 +1,15 @@
--- Session 6: Global markets/crypto heatmap + paper portfolio simulation.
+-- Session 6 (revised): paper portfolio simulation.
 --
--- market_snapshots mirrors news_feeds exactly: shared/system-populated data,
--- not user-owned, so any authenticated user can read it but only the
--- service-role client (bypassing RLS) can write it, via a manual "Refresh
--- Markets" action — same pattern as app/api/news/fetch/route.ts.
-CREATE TABLE IF NOT EXISTS market_snapshots (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  asset_type VARCHAR(10) NOT NULL CHECK (asset_type IN ('index', 'crypto')),
-  symbol VARCHAR(20) NOT NULL,
-  name TEXT NOT NULL,
-  region TEXT,
-  price FLOAT,
-  change_pct FLOAT,
-  market_cap BIGINT,
-  fetched_at TIMESTAMP DEFAULT now(),
-  created_at TIMESTAMP DEFAULT now(),
-  UNIQUE(asset_type, symbol)
-);
-
-CREATE INDEX IF NOT EXISTS idx_market_snapshots_type ON market_snapshots(asset_type);
-
-ALTER TABLE market_snapshots ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Authenticated users can read market snapshots" ON market_snapshots
-  FOR SELECT USING (auth.role() = 'authenticated');
-
--- No INSERT/UPDATE/DELETE policy for regular users on purpose — the refresh
--- endpoint writes via the service-role client, which bypasses RLS.
+-- This migration originally also created a `market_snapshots` table that a
+-- manual "Refresh Markets" button wrote into. That's gone: indices,
+-- commodities, FX and crypto are now fetched live from keyless public feeds
+-- on every request (lib/market/yahooFinance.ts + lib/market/cryptoProvider.ts,
+-- served by /api/market/live and /api/market/crypto and cached at the edge).
+-- Nothing reads a cached market table any more, so it isn't created here.
+--
+-- If you ran an earlier copy of this file, the leftover table is harmless and
+-- can be dropped at your convenience:
+--   DROP TABLE IF EXISTS market_snapshots;
 
 -- ── portfolio_positions: user-owned hypothetical "what if I bought" ──
 -- positions, following the exact ownership + write-policy pattern watchlists
@@ -49,9 +32,17 @@ CREATE INDEX IF NOT EXISTS idx_portfolio_positions_user ON portfolio_positions(u
 
 ALTER TABLE portfolio_positions ENABLE ROW LEVEL SECURITY;
 
+-- DROP-then-CREATE so this file can be re-run safely; CREATE POLICY has no
+-- IF NOT EXISTS form, and a half-applied migration is the usual reason
+-- someone runs it twice.
+DROP POLICY IF EXISTS "Users can view their own portfolio positions" ON portfolio_positions;
 CREATE POLICY "Users can view their own portfolio positions" ON portfolio_positions
   FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can insert their own portfolio positions" ON portfolio_positions;
 CREATE POLICY "Users can insert their own portfolio positions" ON portfolio_positions
   FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can delete their own portfolio positions" ON portfolio_positions;
 CREATE POLICY "Users can delete their own portfolio positions" ON portfolio_positions
   FOR DELETE USING (auth.uid() = user_id);

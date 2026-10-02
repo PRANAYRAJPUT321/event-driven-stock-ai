@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, getSessionUser } from '@/lib/supabase/client'
+import BackendDownNotice from '@/components/BackendDownNotice'
 import { useRouter } from 'next/navigation'
 import AppShell from '@/components/layout/AppShell'
 import ScoreGauge from '@/components/charts/ScoreGauge'
@@ -9,8 +10,10 @@ import TransmissionFlow from '@/components/charts/TransmissionFlow'
 import ReturnSparkline from '@/components/charts/ReturnSparkline'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import ScoreChip from '@/components/ui/ScoreChip'
-import { getMockTechnical } from '@/lib/market/mockData'
+import NewsImpactPanel from '@/components/NewsImpactPanel'
+import ImpactBreakdown from '@/components/ImpactBreakdown'
 import type { User } from '@supabase/supabase-js'
+import type { MarketQuote } from '@/lib/market/yahooFinance'
 
 interface StockScore {
   id: string
@@ -38,17 +41,6 @@ interface ClassificationJson {
   economic_variable: string
   direction: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL'
   transmission_explanation?: string
-}
-
-interface MarketSnapshot {
-  id: string
-  asset_type: 'index' | 'crypto'
-  symbol: string
-  name: string
-  region: string | null
-  price: number | null
-  change_pct: number | null
-  fetched_at: string
 }
 
 // Event types/economic variables where showing live global-market context
@@ -89,16 +81,22 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   const [watchingId, setWatchingId] = useState<string | null>(null)
   const [positionedIds, setPositionedIds] = useState<Set<string>>(new Set())
   const [positioningId, setPositioningId] = useState<string | null>(null)
-  const [marketContext, setMarketContext] = useState<MarketSnapshot[]>([])
+  const [marketContext, setMarketContext] = useState<MarketQuote[]>([])
   const [userId, setUserId] = useState<string | null>(null)
   const [user, setUser] = useState<User | null>(null)
   const router = useRouter()
+  const [backendDown, setBackendDown] = useState(false)
   const supabase = createClient()
 
   useEffect(() => {
     const fetchAnalysis = async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser()
+        const { user, backendDown: down } = await getSessionUser()
+        if (down) {
+          setBackendDown(true)
+          setLoading(false)
+          return
+        }
         if (!user) {
           router.push('/auth/login')
           return
@@ -160,18 +158,24 @@ export default function EventDetails({ params }: { params: { id: string } }) {
     if (!triggered) return
 
     async function loadMarketContext() {
-      const { data } = await supabase
-        .from('market_snapshots')
-        .select('id, asset_type, symbol, name, region, price, change_pct, fetched_at')
-        .eq('asset_type', 'index')
-
-      // market_snapshots has one row per (asset_type, symbol) — upserted in
-      // place on refresh, so no dedup needed. Just surface the most notable
-      // moves first.
-      const sorted = [...(data || [])].sort(
-        (a, b) => Math.abs(b.change_pct ?? 0) - Math.abs(a.change_pct ?? 0)
-      )
-      setMarketContext(sorted.slice(0, 4))
+      // Live from the keyless market endpoint rather than a cached table, so
+      // the context shown next to an event is today's market, not whenever
+      // someone last pressed a refresh button.
+      try {
+        const response = await fetch('/api/market/live')
+        if (!response.ok) return
+        const data = await response.json()
+        const indices = ((data.quotes || []) as MarketQuote[]).filter(
+          (q) => q.category === 'domestic' || q.category === 'international'
+        )
+        // Biggest absolute movers first — those are the ones worth showing.
+        const sorted = [...indices].sort(
+          (a, b) => Math.abs(b.changePct) - Math.abs(a.changePct)
+        )
+        setMarketContext(sorted.slice(0, 4))
+      } catch {
+        // Context is supplementary; a failure here must not break the page.
+      }
     }
 
     loadMarketContext()
@@ -201,7 +205,29 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   async function handleSimulate(stock: StockScore) {
     if (!userId || !analysis || positionedIds.has(stock.id)) return
     setPositioningId(stock.id)
-    const entryPrice = getMockTechnical(stock.stock_symbol).price
+    // The entry price of a paper position has to be a real one — this used to
+    // be getMockTechnical(), a hash of the ticker, which made every recorded
+    // position and its later P&L fictional from the moment it was created.
+    let entryPrice: number | null = null
+    try {
+      const response = await fetch(
+        `/api/stocks/prices?symbols=${encodeURIComponent(stock.stock_symbol)}`
+      )
+      if (response.ok) {
+        const data = await response.json()
+        entryPrice = data.prices?.[stock.stock_symbol.toUpperCase()]?.price ?? null
+      }
+    } catch {
+      // Handled below.
+    }
+    if (entryPrice === null) {
+      setPositioningId(null)
+      alert(
+        `Could not fetch a live price for ${stock.stock_symbol}, so this position was not opened. ` +
+          'Recording it at a made-up entry price would make its P&L meaningless.'
+      )
+      return
+    }
     const { error } = await supabase.from('portfolio_positions').insert({
       user_id: userId,
       stock_scores_id: stock.id,
@@ -218,6 +244,16 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   const handleLogout = async () => {
     await supabase.auth.signOut()
     router.push('/auth/login')
+  }
+
+  // Supabase unreachable: this page's content lives in Postgres, so
+  // there is nothing to show and nowhere useful to redirect to.
+  if (backendDown) {
+    return (
+      <AppShell showTicker={false}>
+        <BackendDownNotice feature="This analysis" />
+      </AppShell>
+    )
   }
 
   if (loading) {
@@ -262,7 +298,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
           className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
             saved
               ? 'bg-buy-dim text-buy border border-buy-dim cursor-default'
-              : 'bg-accent hover:bg-accent-bright text-[#0a0d14] disabled:opacity-50'
+              : 'bg-accent hover:bg-accent-bright text-on-accent disabled:opacity-50'
           }`}
         >
           {saved ? '✓ Saved' : saving ? 'Saving…' : 'Save Analysis'}
@@ -309,6 +345,13 @@ export default function EventDetails({ params }: { params: { id: string } }) {
         </div>
       )}
 
+      {/* Who this event helps and who it hurts, through the same mechanism. */}
+      <ImpactBreakdown
+        title={analysis.event_title}
+        sectors={analysis.affected_sectors || []}
+        companies={stocks.slice(0, 6).map((stock) => ({ symbol: stock.stock_symbol }))}
+      />
+
       {/* Global Market Context */}
       {marketContext.length > 0 && (
         <div className="panel p-7 mb-6 fade-in">
@@ -323,24 +366,33 @@ export default function EventDetails({ params }: { params: { id: string } }) {
           </div>
           <p className="text-xs text-ink-faint mb-4">
             This event&apos;s classification ({classification?.economic_variable || classification?.event_type}) is
-            the kind that transmits through world markets — here&apos;s how major indices stood as of the last refresh.
+            the kind that transmits through world markets — here&apos;s where the major indices are right now.
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {marketContext.map((s) => (
-              <div key={s.id} className="border border-border rounded-lg p-3">
-                <p className="font-mono text-[10px] text-ink-faint uppercase truncate">{s.region || s.symbol}</p>
-                <p className="font-semibold text-ink text-xs truncate" title={s.name}>
-                  {s.name}
+            {marketContext.map((q) => (
+              <div key={q.symbol} className="border border-border rounded-lg p-3 tile-hover">
+                <p className="font-mono text-[10px] text-ink-faint uppercase truncate">
+                  {q.category === 'domestic' ? 'India' : 'Global'}
                 </p>
-                <p className={`mono-tabular text-sm font-bold ${(s.change_pct ?? 0) >= 0 ? 'text-buy' : 'text-avoid'}`}>
-                  {(s.change_pct ?? 0) >= 0 ? '+' : ''}
-                  {s.change_pct?.toFixed(2)}%
+                <p className="font-semibold text-ink text-xs truncate" title={q.name}>
+                  {q.name}
+                </p>
+                <p className={`mono-tabular text-sm font-bold ${q.changePct >= 0 ? 'text-buy' : 'text-avoid'}`}>
+                  {q.changePct >= 0 ? '+' : ''}
+                  {q.changePct.toFixed(2)}%
                 </p>
               </div>
             ))}
           </div>
         </div>
       )}
+
+      {/* Live news impact: the mechanism above, checked against what is
+          actually being published about those sectors and companies. */}
+      <NewsImpactPanel
+        sectors={analysis.affected_sectors || []}
+        companies={stocks.slice(0, 3).map((stock) => ({ symbol: stock.stock_symbol }))}
+      />
 
       {/* Historical Event Evidence */}
       {analysis.historical_summary && analysis.historical_summary.matchCount > 0 && (

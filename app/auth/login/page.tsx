@@ -1,7 +1,8 @@
 'use client'
 
 import { Suspense, useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, describeAuthError, isSupabaseConfigured, isUnreachable } from '@/lib/supabase/client'
+import ThemeToggle from '@/components/ui/ThemeToggle'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 
@@ -10,6 +11,9 @@ function LoginForm() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  // Distinguishes "we cannot reach the service" from "wrong password": only
+  // the former means signing in is impossible rather than merely failed.
+  const [backendUnreachable, setBackendUnreachable] = useState(false)
   const router = useRouter()
   const searchParams = useSearchParams()
   const message = searchParams.get('message')
@@ -18,32 +22,49 @@ function LoginForm() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    setBackendUnreachable(false)
     setLoading(true)
 
     try {
       const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
       if (authError) {
-        setError(authError.message)
+        setError(describeAuthError(authError))
+        setBackendUnreachable(isUnreachable(authError))
         return
       }
       router.push('/dashboard')
     } catch (err: any) {
-      setError(err.message || 'An error occurred')
+      setError(describeAuthError(err))
+      setBackendUnreachable(isUnreachable(err))
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="min-h-screen grid-backdrop flex items-center justify-center px-4 font-sans text-ink">
+    <div className="relative min-h-screen grid-backdrop flex items-center justify-center px-4 font-sans text-ink">
+      <div className="absolute top-4 right-4">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-md fade-in">
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 mb-3">
             <span className="live-dot" />
-            <span className="font-mono text-2xl font-bold tracking-tight">PULSE</span>
+            <span className="font-mono text-2xl font-bold tracking-tight neon-text">PULSE</span>
           </div>
           <p className="text-ink-muted text-sm">Event-driven stock intelligence for Indian equities</p>
         </div>
+
+        {!isSupabaseConfigured && (
+          <div className="bg-avoid-dim border border-avoid-dim text-avoid px-4 py-3 rounded-lg mb-5 text-sm">
+            This deployment was built without Supabase credentials, so sign-in cannot work yet.
+            Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY on the project and
+            redeploy — they are baked in at build time.{' '}
+            <a href="/api/health" className="underline font-medium">
+              Run diagnostics
+            </a>
+          </div>
+        )}
 
         <div className="panel-elevated shadow-panel p-8">
           {message && (
@@ -53,7 +74,15 @@ function LoginForm() {
           )}
           {error && (
             <div className="bg-avoid-dim border border-avoid-dim text-avoid px-4 py-3 rounded-lg mb-5 text-sm">
-              {error}
+              <p>{error}</p>
+              {backendUnreachable && (
+                <Link
+                  href="/markets"
+                  className="mt-3 block text-center bg-accent hover:bg-accent-bright text-on-accent font-semibold py-2 px-4 rounded-lg transition"
+                >
+                  Continue without signing in →
+                </Link>
+              )}
             </div>
           )}
 
@@ -84,8 +113,8 @@ function LoginForm() {
 
             <button
               type="submit"
-              disabled={loading}
-              className="w-full bg-accent hover:bg-accent-bright disabled:opacity-50 text-[#0a0d14] font-semibold py-2.5 px-4 rounded-lg transition"
+              disabled={loading || !isSupabaseConfigured}
+              className="w-full bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold py-2.5 px-4 rounded-lg transition"
             >
               {loading ? 'Signing in…' : 'Sign In'}
             </button>
@@ -95,6 +124,14 @@ function LoginForm() {
             Don&apos;t have an account?{' '}
             <Link href="/auth/signup" className="text-accent-bright hover:underline font-medium">
               Sign up
+            </Link>
+          </div>
+
+          {/* The live-market pages need no account and no database, so there
+              is somewhere useful to go even when sign-in is impossible. */}
+          <div className="mt-3 text-center text-xs text-ink-faint">
+            <Link href="/markets" className="hover:text-accent hover:underline">
+              Or browse live markets without signing in →
             </Link>
           </div>
         </div>

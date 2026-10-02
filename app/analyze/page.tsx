@@ -2,7 +2,8 @@
 
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, getSessionUser } from '@/lib/supabase/client'
+import AnalysisResult, { type AnalysisPayload } from '@/components/AnalysisResult'
 import AppShell from '@/components/layout/AppShell'
 import type { User } from '@supabase/supabase-js'
 
@@ -27,25 +28,37 @@ function AnalyzeForm() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [newsSource, setNewsSource] = useState<NewsSource | null>(null)
+  // Set when an analysis completed but could not be stored — the result is
+  // rendered in place instead of redirecting to a saved page that does not
+  // exist.
+  const [unsavedResult, setUnsavedResult] = useState<AnalysisPayload | null>(null)
   const [user, setUser] = useState<User | null>(null)
   const router = useRouter()
+  const [backendDown, setBackendDown] = useState(false)
   const searchParams = useSearchParams()
   const newsId = searchParams.get('news_id')
+  // Discover passes the headline itself when it is showing live, unstored
+  // items that have no database row to look up.
+  const presetEvent = searchParams.get('event')
   const supabase = createClient()
 
   useEffect(() => {
     const init = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) {
-        router.push('/auth/login')
-        return
-      }
-      setUser(session.user)
+      // No guard here: the analysis engine is deterministic and needs no
+      // database, so this page works signed out and while Supabase is down.
+      // The session only decides whether the result can be saved.
+      const { user: sessionUser, backendDown: down } = await getSessionUser()
+      setBackendDown(down)
+      setUser(sessionUser)
     }
     init()
   }, [])
 
   useEffect(() => {
+    if (presetEvent) {
+      setEventText(presetEvent)
+      return
+    }
     if (!newsId) return
     const loadNews = async () => {
       const { data } = await supabase.from('news_feeds').select('*').eq('id', newsId).single()
@@ -55,7 +68,7 @@ function AnalyzeForm() {
       }
     }
     loadNews()
-  }, [newsId])
+  }, [newsId, presetEvent])
 
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -76,7 +89,12 @@ function AnalyzeForm() {
 
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Analysis failed')
-      router.push(`/events/${data.analysisId}`)
+      if (data.persisted && data.analysisId) {
+        router.push(`/events/${data.analysisId}`)
+        return
+      }
+      // No database to save to — show the result rather than discarding it.
+      setUnsavedResult(data.result)
     } catch (err: any) {
       setError(err.message || 'An error occurred')
     } finally {
@@ -89,6 +107,22 @@ function AnalyzeForm() {
     router.push('/auth/login')
   }
 
+  if (unsavedResult) {
+    return (
+      <AppShell userEmail={user?.email} onLogout={handleLogout} showTicker={false}>
+        <div className="max-w-4xl mx-auto">
+          <button
+            onClick={() => setUnsavedResult(null)}
+            className="text-xs text-ink-muted hover:text-accent mb-4 transition"
+          >
+            ← Analyze another event
+          </button>
+          <AnalysisResult payload={unsavedResult} />
+        </div>
+      </AppShell>
+    )
+  }
+
   return (
     <AppShell userEmail={user?.email} onLogout={handleLogout} showTicker={false}>
       <div className="max-w-3xl mx-auto fade-in">
@@ -97,6 +131,14 @@ function AnalyzeForm() {
         <p className="text-ink-muted mb-8 text-sm">
           Every recommendation this platform produces is tied to a specific event — never a generic stock call.
         </p>
+
+        {(backendDown || !user) && (
+          <div className="bg-hold-dim border border-hold-dim text-hold px-4 py-3 rounded-lg mb-6 text-sm">
+            {backendDown
+              ? 'The database is unreachable, so this analysis will run but will not be saved to your history.'
+              : 'You are not signed in, so this analysis will run but will not be saved to your history.'}
+          </div>
+        )}
 
         <div className="panel-elevated p-7 shadow-panel">
           {newsSource && (
@@ -135,7 +177,7 @@ function AnalyzeForm() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-accent hover:bg-accent-bright disabled:opacity-50 text-[#0a0d14] font-semibold py-3 px-6 rounded-lg transition"
+              className="w-full bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold py-3 px-6 rounded-lg transition"
             >
               {loading ? 'Classifying event, scoring stocks…' : 'Analyze Event'}
             </button>

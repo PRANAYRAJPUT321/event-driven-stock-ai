@@ -1,6 +1,54 @@
 import Anthropic from '@anthropic-ai/sdk'
+import {
+  buildCounterArgumentFromRules,
+  categorizeNewsByRules,
+  classifyEventByRules,
+} from './ruleClassifier'
 
-const client = new Anthropic()
+// Constructed lazily: `new Anthropic()` throws when ANTHROPIC_API_KEY is
+// unset, and this module must be importable — and usable, via the rule
+// fallbacks below — on a deployment with no AI key configured at all.
+let client: Anthropic | null = null
+function getClient(): Anthropic {
+  if (!client) client = new Anthropic()
+  return client
+}
+
+/**
+ * Whether the language model is even worth attempting. Without a key every
+ * call is a guaranteed failure, so skipping it avoids a pointless round trip
+ * on every single request.
+ */
+function llmConfigured(): boolean {
+  return Boolean(process.env.ANTHROPIC_API_KEY)
+}
+
+/**
+ * The LLM is an enhancement, never a dependency.
+ *
+ * Analyze and Discover were both taken down by a single billing state
+ * ("credit balance too low"), which is not a condition a user can diagnose or
+ * a state the product should be unusable in. So every AI call now runs
+ * through here: on any failure — no key, no credit, rate limit, timeout,
+ * malformed JSON — the deterministic engine in ruleClassifier.ts answers
+ * instead, and the request succeeds.
+ *
+ * The failure is logged, not swallowed silently, so a broken key is still
+ * discoverable in the runtime logs.
+ */
+async function withRuleFallback<T>(
+  label: string,
+  attempt: () => Promise<T>,
+  fallback: () => T
+): Promise<T> {
+  if (!llmConfigured()) return fallback()
+  try {
+    return await attempt()
+  } catch (error: any) {
+    console.warn(`[ai] ${label} fell back to rules: ${error?.message || error}`)
+    return fallback()
+  }
+}
 
 // Structured-JSON-only calls use Sonnet — fast and reliable for classification/extraction.
 // claude-3-5-sonnet-20241022 (the prior pin) has been retired; claude-sonnet-5 is the
@@ -48,14 +96,55 @@ Return ONLY valid JSON (no markdown, no code fences):
 }
 `
 
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 700,
-    messages: [{ role: 'user', content: prompt }],
-  })
+  return withRuleFallback(
+    'classifyEvent',
+    async () => {
+      const response = await getClient().messages.create({
+        model: MODEL,
+        max_tokens: 700,
+        messages: [{ role: 'user', content: prompt }],
+      })
+      const text = response.content[0].type === 'text' ? response.content[0].text : ''
+      return normalizeClassification(extractJson(text), eventText)
+    },
+    () => classifyEventByRules(eventText)
+  )
+}
 
-  const text = response.content[0].type === 'text' ? response.content[0].text : ''
-  return extractJson(text)
+/**
+ * The model is asked for a fixed JSON shape but isn't guaranteed to honour it.
+ * Anything missing or out of range is repaired from the rule engine's answer
+ * for the same text, so a partially-valid response can't put a NaN score or an
+ * unknown direction into the scoring engine.
+ */
+function normalizeClassification(raw: any, eventText: string): EventClassification {
+  const rules = classifyEventByRules(eventText)
+  const direction = ['POSITIVE', 'NEGATIVE', 'NEUTRAL'].includes(raw?.direction)
+    ? raw.direction
+    : rules.direction
+  const boundedNumber = (value: unknown, fallback: number) =>
+    typeof value === 'number' && Number.isFinite(value)
+      ? Math.max(0, Math.min(100, Math.round(value)))
+      : fallback
+
+  const sectors = Array.isArray(raw?.affected_sectors)
+    ? raw.affected_sectors.filter((s: unknown) => typeof s === 'string' && s.trim() !== '')
+    : []
+
+  return {
+    event_type: typeof raw?.event_type === 'string' ? raw.event_type : rules.event_type,
+    economic_variable:
+      typeof raw?.economic_variable === 'string' ? raw.economic_variable : rules.economic_variable,
+    direction,
+    magnitude: boundedNumber(raw?.magnitude, rules.magnitude),
+    affected_sectors: sectors.length > 0 ? sectors : rules.affected_sectors,
+    confidence: boundedNumber(raw?.confidence, rules.confidence),
+    reasoning: typeof raw?.reasoning === 'string' && raw.reasoning ? raw.reasoning : rules.reasoning,
+    transmission_explanation:
+      typeof raw?.transmission_explanation === 'string' && raw.transmission_explanation
+        ? raw.transmission_explanation
+        : rules.transmission_explanation,
+  }
 }
 
 export interface DecisionInput {
@@ -65,10 +154,15 @@ export interface DecisionInput {
   eventMagnitude: number
   stockSymbol: string
   compositeScore: number
-  fundamentalScore: number
-  valuationScore: number
-  technicalScore: number
-  riskScore: number
+  /**
+   * null when the factor had no sourced input and was excluded from the
+   * composite — see calculateCompositeFromAvailable. The narrative says so
+   * instead of treating a missing input as a neutral score.
+   */
+  fundamentalScore: number | null
+  valuationScore: number | null
+  technicalScore: number | null
+  riskScore: number | null
   historicalSummary?: string
 }
 
@@ -86,6 +180,11 @@ export interface DecisionOutput {
  * passed in here as context — the AI explains and challenges the numbers, it never
  * produces or overrides them (spec section 19 & 20).
  */
+/** Renders a factor for the prompt without inventing a value for a missing one. */
+function fmtScore(score: number | null): string {
+  return score === null ? 'not available' : `${score}/100`
+}
+
 export async function generateCounterArgument(input: DecisionInput): Promise<DecisionOutput> {
   const prompt = `
 You are the counter-argument and explainability layer of an event-driven equity
@@ -99,10 +198,12 @@ Event direction: ${input.eventDirection} (magnitude ${input.eventMagnitude}/100)
 
 Stock: ${input.stockSymbol}
 Composite Event Opportunity Score: ${input.compositeScore}/100
-Fundamental Score: ${input.fundamentalScore}/100
-Valuation Score: ${input.valuationScore}/100
-Technical Score: ${input.technicalScore}/100
-Risk Score: ${input.riskScore}/100
+Fundamental Score: ${fmtScore(input.fundamentalScore)}
+Valuation Score: ${fmtScore(input.valuationScore)}
+Technical Score: ${fmtScore(input.technicalScore)}
+Risk Score: ${fmtScore(input.riskScore)}
+Factors marked "not available" could not be sourced and were excluded from the
+composite entirely. Do not guess at them or treat them as average.
 ${input.historicalSummary ? `Historical evidence: ${input.historicalSummary}` : 'Historical evidence: limited data available'}
 
 Before concluding, actively try to challenge the thesis implied by the scores.
@@ -117,14 +218,32 @@ Return ONLY valid JSON:
 }
 `
 
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 900,
-    messages: [{ role: 'user', content: prompt }],
-  })
-
-  const text = response.content[0].type === 'text' ? response.content[0].text : ''
-  return extractJson(text)
+  return withRuleFallback(
+    'generateCounterArgument',
+    async () => {
+      const response = await getClient().messages.create({
+        model: MODEL,
+        max_tokens: 900,
+        messages: [{ role: 'user', content: prompt }],
+      })
+      const text = response.content[0].type === 'text' ? response.content[0].text : ''
+      const raw = extractJson(text)
+      const rules = buildCounterArgumentFromRules(input)
+      const str = (value: unknown, fallback: string) =>
+        typeof value === 'string' && value.trim() !== '' ? value : fallback
+      return {
+        bullCase: str(raw?.bullCase, rules.bullCase),
+        bearCase: str(raw?.bearCase, rules.bearCase),
+        contradictoryEvidence: str(raw?.contradictoryEvidence, rules.contradictoryEvidence),
+        keyRisks:
+          Array.isArray(raw?.keyRisks) && raw.keyRisks.length > 0
+            ? raw.keyRisks.filter((r: unknown) => typeof r === 'string')
+            : rules.keyRisks,
+        finalReasoning: str(raw?.finalReasoning, rules.finalReasoning),
+      }
+    },
+    () => buildCounterArgumentFromRules(input)
+  )
 }
 
 export interface NewsCategorization {
@@ -159,12 +278,32 @@ Return ONLY valid JSON (no markdown):
 }
 `
 
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 250,
-    messages: [{ role: 'user', content: prompt }],
-  })
-
-  const text = response.content[0].type === 'text' ? response.content[0].text : ''
-  return extractJson(text)
+  return withRuleFallback(
+    'categorizeNewsItem',
+    async () => {
+      const response = await getClient().messages.create({
+        model: MODEL,
+        max_tokens: 250,
+        messages: [{ role: 'user', content: prompt }],
+      })
+      const text = response.content[0].type === 'text' ? response.content[0].text : ''
+      const raw = extractJson(text)
+      const rules = categorizeNewsByRules(title, description)
+      return {
+        is_market_relevant:
+          typeof raw?.is_market_relevant === 'boolean'
+            ? raw.is_market_relevant
+            : rules.is_market_relevant,
+        event_type: typeof raw?.event_type === 'string' ? raw.event_type : rules.event_type,
+        affected_sectors: Array.isArray(raw?.affected_sectors)
+          ? raw.affected_sectors.filter((s: unknown) => typeof s === 'string')
+          : rules.affected_sectors,
+        relevance_score:
+          typeof raw?.relevance_score === 'number' && Number.isFinite(raw.relevance_score)
+            ? Math.max(0, Math.min(100, Math.round(raw.relevance_score)))
+            : rules.relevance_score,
+      }
+    },
+    () => categorizeNewsByRules(title, description)
+  )
 }

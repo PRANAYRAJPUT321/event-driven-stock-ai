@@ -2,40 +2,67 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, getSessionUser } from '@/lib/supabase/client'
 import AppShell from '@/components/layout/AppShell'
 import type { User } from '@supabase/supabase-js'
+import type { MarketQuote } from '@/lib/market/yahooFinance'
 
-interface Snapshot {
-  id: string
-  asset_type: 'index' | 'crypto'
+interface CryptoCoin {
   symbol: string
   name: string
-  region: string | null
-  price: number | null
-  change_pct: number | null
-  market_cap: number | null
-  fetched_at: string
+  price: number
+  changePct: number
+  marketCap: number
 }
 
-type Tab = 'index' | 'crypto'
+type Tab = 'equities' | 'india' | 'world' | 'commodities' | 'currencies' | 'crypto'
 
-// Heat intensity scales with |change_pct| up to this cap, so a routine ±0.3%
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'equities', label: 'NIFTY 50 Stocks' },
+  { id: 'india', label: 'India Indices' },
+  { id: 'world', label: 'World Indices' },
+  { id: 'commodities', label: 'Commodities' },
+  { id: 'currencies', label: 'Currencies' },
+  { id: 'crypto', label: 'Crypto' },
+]
+
+interface EquityQuote {
+  symbol: string
+  name: string
+  sector: string
+  price: number
+  changePct: number
+}
+
+// Heat intensity scales with |change| up to this cap, so a routine ±0.3%
 // index move and a routine ±5% crypto move both read as "mild" rather than
 // crypto tiles being permanently maxed-out red/green.
-const MAX_ABS_PCT: Record<Tab, number> = { index: 3, crypto: 8 }
+// Each asset class has its own idea of a big day: a 2% index move is large,
+// a 2% crypto move is noise. Scaling per tab keeps the colour meaningful
+// instead of leaving crypto permanently saturated.
+const MAX_ABS_PCT: Record<Tab, number> = {
+  equities: 4,
+  india: 2.5,
+  world: 2.5,
+  commodities: 3,
+  currencies: 1.2,
+  crypto: 8,
+}
 
-function heatStyle(changePct: number | null, tab: Tab): React.CSSProperties {
-  const pct = changePct ?? 0
-  const alpha = Math.min(Math.abs(pct) / MAX_ABS_PCT[tab], 1) * 0.5 + 0.08
-  const [r, g, b] = pct >= 0 ? [52, 211, 153] : [248, 113, 113]
+function heatStyle(changePct: number, tab: Tab): React.CSSProperties {
+  const alpha = Math.min(Math.abs(changePct) / MAX_ABS_PCT[tab], 1) * 0.42 + 0.06
+  // Reads the live theme tokens so tiles re-tint in light mode instead of
+  // painting dark-mode neon onto a white page.
+  const base = changePct >= 0 ? 'var(--buy)' : 'var(--avoid)'
   return {
-    background: `rgba(${r}, ${g}, ${b}, ${alpha})`,
-    borderColor: `rgba(${r}, ${g}, ${b}, ${Math.min(alpha + 0.25, 0.9)})`,
+    background: `color-mix(in srgb, ${base} ${Math.round(alpha * 100)}%, transparent)`,
+    borderColor: `color-mix(in srgb, ${base} ${Math.round(
+      Math.min(alpha + 0.3, 0.9) * 100
+    )}%, transparent)`,
   }
 }
 
-function formatMarketCap(cap: number | null): string {
+function formatMarketCap(cap: number): string {
   if (!cap) return ''
   if (cap >= 1e12) return `$${(cap / 1e12).toFixed(2)}T`
   if (cap >= 1e9) return `$${(cap / 1e9).toFixed(2)}B`
@@ -43,59 +70,98 @@ function formatMarketCap(cap: number | null): string {
   return `$${cap.toFixed(0)}`
 }
 
+interface Tile {
+  key: string
+  group: string
+  name: string
+  price: number
+  changePct: number
+  footnote?: string
+  /** Set for tiles that link somewhere — equities link to their profile. */
+  href?: string
+}
+
 export default function Markets() {
   const router = useRouter()
   const supabase = createClient()
   const [user, setUser] = useState<User | null>(null)
-  const [snapshots, setSnapshots] = useState<Snapshot[]>([])
+  const [quotes, setQuotes] = useState<MarketQuote[]>([])
+  const [equities, setEquities] = useState<EquityQuote[]>([])
+  const [coins, setCoins] = useState<CryptoCoin[]>([])
+  const [sectorFilter, setSectorFilter] = useState('All')
+  const [failed, setFailed] = useState<string[]>([])
+  const [errors, setErrors] = useState<string[]>([])
+  const [fetchedAt, setFetchedAt] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [refreshMsg, setRefreshMsg] = useState('')
-  const [tab, setTab] = useState<Tab>('index')
+  const [tab, setTab] = useState<Tab>('equities')
 
   useEffect(() => {
-    loadSnapshots()
+    let active = true
+
+    async function init() {
+      // Deliberately no auth guard: every tab on this page comes from keyless
+      // public feeds, so it stays usable signed out — and, more to the point,
+      // while the database is unreachable. The session lookup is only for the
+      // header's email/logout affordance.
+      const { user } = await getSessionUser()
+      if (active) setUser(user)
+      await load(active)
+    }
+
+    init()
+    // Same cadence as the market bar. The routes are edge-cached, so this is
+    // cheap regardless of how many tabs are open.
+    const interval = setInterval(() => load(active), 60000)
+    return () => {
+      active = false
+      clearInterval(interval)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  async function loadSnapshots() {
-    setLoading(true)
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      router.push('/auth/login')
-      return
+  async function load(active = true) {
+    // Three independent sources; one being rate-limited must not blank the
+    // others' tabs, so each is settled and reported separately.
+    const [marketRes, equityRes, cryptoRes] = await Promise.allSettled([
+      fetch('/api/market/live?scope=full').then(async (r) => ({ ok: r.ok, body: await r.json() })),
+      fetch('/api/market/equities').then(async (r) => ({ ok: r.ok, body: await r.json() })),
+      fetch('/api/market/crypto').then(async (r) => ({ ok: r.ok, body: await r.json() })),
+    ])
+    if (!active) return
+
+    const nextErrors: string[] = []
+    const nextFailed: string[] = []
+
+    if (marketRes.status === 'fulfilled' && marketRes.value.ok) {
+      setQuotes(marketRes.value.body.quotes || [])
+      nextFailed.push(...(marketRes.value.body.failed || []))
+      setFetchedAt(marketRes.value.body.fetchedAt || null)
+    } else {
+      const reason =
+        marketRes.status === 'fulfilled' ? marketRes.value.body?.error : (marketRes.reason as Error)?.message
+      nextErrors.push(`Indices, commodities & FX: ${reason || 'unavailable'}`)
     }
-    setUser(user)
 
-    const { data } = await supabase
-      .from('market_snapshots')
-      .select('*')
-      .order('asset_type', { ascending: true })
-      .order('market_cap', { ascending: false, nullsFirst: false })
+    if (equityRes.status === 'fulfilled' && equityRes.value.ok) {
+      setEquities(equityRes.value.body.quotes || [])
+      nextFailed.push(...(equityRes.value.body.failed || []))
+    } else {
+      const reason =
+        equityRes.status === 'fulfilled' ? equityRes.value.body?.error : (equityRes.reason as Error)?.message
+      nextErrors.push(`NIFTY 50 stocks: ${reason || 'unavailable'}`)
+    }
 
-    setSnapshots(data || [])
+    if (cryptoRes.status === 'fulfilled' && cryptoRes.value.ok) {
+      setCoins(cryptoRes.value.body.coins || [])
+    } else {
+      const reason =
+        cryptoRes.status === 'fulfilled' ? cryptoRes.value.body?.error : (cryptoRes.reason as Error)?.message
+      nextErrors.push(`Crypto: ${reason || 'unavailable'}`)
+    }
+
+    setFailed(nextFailed)
+    setErrors(nextErrors)
     setLoading(false)
-  }
-
-  async function handleRefresh() {
-    setRefreshing(true)
-    setRefreshMsg('')
-    try {
-      const response = await fetch('/api/markets/refresh', { method: 'POST' })
-      const result = await response.json()
-      if (!response.ok) {
-        setRefreshMsg(result.error || 'Refresh failed')
-      } else {
-        const parts = [`${result.indices} indices`, `${result.crypto} crypto assets`]
-        setRefreshMsg(
-          `Updated ${parts.join(', ')}.` + (result.warnings ? ` (${result.warnings.join('; ')})` : '')
-        )
-        await loadSnapshots()
-      }
-    } catch (err: any) {
-      setRefreshMsg(err.message || 'Refresh failed')
-    } finally {
-      setRefreshing(false)
-    }
   }
 
   const handleLogout = async () => {
@@ -103,58 +169,129 @@ export default function Markets() {
     router.push('/auth/login')
   }
 
-  const indices = snapshots.filter((s) => s.asset_type === 'index')
-  const crypto = snapshots.filter((s) => s.asset_type === 'crypto')
-  const active = tab === 'index' ? indices : crypto
-  const lastUpdated = snapshots[0]?.fetched_at
+  const tilesFor = (predicate: (q: MarketQuote) => boolean, group: (q: MarketQuote) => string): Tile[] =>
+    quotes.filter(predicate).map((q) => ({
+      key: q.symbol,
+      group: group(q),
+      name: q.name,
+      price: q.price,
+      changePct: q.changePct,
+      footnote: q.currency,
+    }))
+
+  const equityTiles: Tile[] = equities
+    .filter((e) => sectorFilter === 'All' || e.sector === sectorFilter)
+    .map((e) => ({
+      key: e.symbol,
+      group: e.sector,
+      name: e.name,
+      price: e.price,
+      changePct: e.changePct,
+      footnote: e.symbol,
+      href: `/stocks/${e.symbol}`,
+    }))
+
+  const byTab: Record<Tab, Tile[]> = {
+    equities: equityTiles,
+    india: tilesFor((q) => q.category === 'domestic', () => 'India'),
+    world: tilesFor((q) => q.category === 'international', () => 'Global'),
+    commodities: tilesFor((q) => q.category === 'commodity', () => 'Commodity'),
+    currencies: tilesFor((q) => q.category === 'currency', () => 'FX'),
+    crypto: coins.map((c) => ({
+      key: c.symbol,
+      group: c.symbol,
+      name: c.name,
+      price: c.price,
+      changePct: c.changePct,
+      footnote: formatMarketCap(c.marketCap),
+    })),
+  }
+  const active = byTab[tab]
+
+  // Sector filter chips, only meaningful on the equities tab.
+  const equitySectors = ['All', ...Array.from(new Set(equities.map((e) => e.sector))).sort()]
+
+  // A breadth count says more about a session than any single tile.
+  const advancing = active.filter((t) => t.changePct > 0).length
+  const declining = active.filter((t) => t.changePct < 0).length
 
   return (
     <AppShell userEmail={user?.email} onLogout={handleLogout}>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 fade-in">
         <div>
-          <p className="text-xs font-mono uppercase tracking-widest text-accent-bright mb-2">Global markets</p>
-          <h1 className="text-2xl sm:text-3xl font-bold text-ink mb-1">Indices &amp; Crypto Heatmap</h1>
+          <p className="text-xs font-mono uppercase tracking-widest text-accent mb-2">Global markets</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-ink mb-1">Live Market Heatmap</h1>
           <p className="text-ink-muted text-sm">
-            World indices and top crypto by market cap, color-scaled by 24h move.
+            Every NIFTY 50 stock, Indian sector indices, the major exchanges of every region,
+            the commodity complex, INR crosses and the top 50 cryptocurrencies — colour-scaled by
+            today&apos;s move. Fetched live from keyless public feeds, refreshed every minute.
           </p>
         </div>
-        <button
-          onClick={handleRefresh}
-          disabled={refreshing}
-          className="flex-shrink-0 bg-accent hover:bg-accent-bright disabled:opacity-50 text-[#0a0d14] font-semibold px-4 py-2.5 rounded-lg text-sm transition"
-        >
-          {refreshing ? 'Fetching…' : '↻ Refresh Markets'}
-        </button>
+        <div className="flex flex-col items-start sm:items-end gap-1.5 flex-shrink-0">
+          {fetchedAt && (
+            <span className="flex items-center gap-2 text-[10px] font-mono text-ink-faint">
+              <span className="live-dot" />
+              Updated {new Date(fetchedAt).toLocaleTimeString('en-IN', { hour12: false })}
+            </span>
+          )}
+          {!loading && active.length > 0 && (
+            <span className="text-[11px] font-mono mono-tabular">
+              <span className="text-buy">{advancing} advancing</span>
+              <span className="text-ink-faint"> · </span>
+              <span className="text-avoid">{declining} declining</span>
+            </span>
+          )}
+        </div>
       </div>
 
-      {refreshMsg && (
-        <p className="text-sm text-accent-bright bg-accent-dim/40 border border-accent-dim rounded-lg px-3 py-2 mb-6">
-          {refreshMsg}
+      {errors.map((message) => (
+        <p
+          key={message}
+          className="text-sm text-avoid bg-avoid-dim border border-avoid-dim rounded-lg px-3 py-2 mb-3"
+        >
+          {message}
+        </p>
+      ))}
+
+      {failed.length > 0 && (
+        <p className="text-xs text-ink-faint font-mono mb-4">
+          No data for: {failed.join(', ')}
         </p>
       )}
 
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex gap-2">
-          {(['index', 'crypto'] as Tab[]).map((t) => (
+      <div className="flex gap-2 mb-6 overflow-x-auto pb-1">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium border transition ${
+              tab === t.id
+                ? 'bg-accent text-on-accent border-accent shadow-glow'
+                : 'bg-surface text-ink-muted border-border hover:border-accent-dim'
+            }`}
+          >
+            {t.label} ({byTab[t.id].length})
+          </button>
+        ))}
+      </div>
+
+      {tab === 'equities' && equitySectors.length > 1 && (
+        <div className="flex gap-2 mb-6 overflow-x-auto pb-1">
+          {equitySectors.map((sector) => (
             <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium border transition ${
-                tab === t
-                  ? 'bg-accent text-[#0a0d14] border-accent'
-                  : 'bg-surface text-ink-muted border-border hover:border-border-bright'
+              key={sector}
+              onClick={() => setSectorFilter(sector)}
+              className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition ${
+                sectorFilter === sector
+                  ? 'bg-surface-2 text-accent border-accent-dim'
+                  : 'bg-surface text-ink-muted border-border hover:border-accent-dim'
               }`}
             >
-              {t === 'index' ? `Indices (${indices.length})` : `Crypto (${crypto.length})`}
+              {sector}
             </button>
           ))}
         </div>
-        {lastUpdated && (
-          <span className="text-[10px] font-mono text-ink-faint hidden sm:inline">
-            Updated {new Date(lastUpdated).toLocaleTimeString()}
-          </span>
-        )}
-      </div>
+      )}
 
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -164,47 +301,51 @@ export default function Markets() {
         </div>
       ) : active.length === 0 ? (
         <div className="panel p-10 text-center text-ink-muted">
-          <p className="text-lg mb-2 text-ink">No market data cached yet</p>
-          <p className="text-sm mb-6">
-            Tap <strong className="text-ink">Refresh Markets</strong> above to pull live
-            {tab === 'index' ? ' index' : ' crypto'} data.
+          <p className="text-lg mb-2 text-ink">No data for this tab right now</p>
+          <p className="text-sm">
+            The upstream feed is rate-limiting or unreachable. It refreshes automatically every
+            minute — no key or manual refresh needed.
           </p>
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="bg-accent hover:bg-accent-bright disabled:opacity-50 text-[#0a0d14] font-semibold px-6 py-2 rounded-lg transition"
-          >
-            {refreshing ? 'Fetching…' : 'Refresh Markets'}
-          </button>
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {active.map((s, idx) => (
-            <div
-              key={s.id}
-              style={{ ...heatStyle(s.change_pct, tab), animationDelay: `${Math.min(idx * 30, 300)}ms` }}
-              className="tile-hover fade-in rounded-xl border p-4"
+          {active.map((tile, idx) => {
+            // Equity tiles are links to the stock's own page; index and
+            // commodity tiles have nowhere more specific to go.
+            const Tag = (tile.href ? 'a' : 'div') as any
+            return (
+            <Tag
+              key={tile.key}
+              {...(tile.href ? { href: tile.href } : {})}
+              style={{ ...heatStyle(tile.changePct, tab), animationDelay: `${Math.min(idx * 30, 300)}ms` }}
+              className="tile-hover fade-in rounded-xl border p-4 block"
             >
               <p className="font-mono text-[10px] uppercase tracking-wide text-ink-faint mb-1">
-                {s.region || s.symbol}
+                {tile.group}
               </p>
-              <p className="font-bold text-ink text-sm mb-2 truncate" title={s.name}>
-                {s.name}
+              <p className="font-bold text-ink text-sm mb-2 truncate" title={tile.name}>
+                {tile.name}
               </p>
               <p className="mono-tabular text-lg font-bold text-ink">
-                {tab === 'crypto' && s.price != null && s.price < 1
-                  ? s.price.toFixed(4)
-                  : s.price?.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                {tile.price.toLocaleString('en-IN', {
+                  minimumFractionDigits: tile.price < 10 ? 4 : 2,
+                  maximumFractionDigits: tile.price < 10 ? 4 : 2,
+                })}
               </p>
-              <p className={`mono-tabular text-sm font-semibold ${(s.change_pct ?? 0) >= 0 ? 'text-buy' : 'text-avoid'}`}>
-                {(s.change_pct ?? 0) >= 0 ? '+' : ''}
-                {s.change_pct?.toFixed(2)}%
+              <p
+                className={`mono-tabular text-sm font-semibold ${
+                  tile.changePct >= 0 ? 'text-buy' : 'text-avoid'
+                }`}
+              >
+                {tile.changePct >= 0 ? '+' : ''}
+                {tile.changePct.toFixed(2)}%
               </p>
-              {s.market_cap != null && s.market_cap > 0 && (
-                <p className="text-[10px] text-ink-faint mt-1 font-mono">{formatMarketCap(s.market_cap)}</p>
+              {tile.footnote && (
+                <p className="text-[10px] text-ink-faint mt-1 font-mono">{tile.footnote}</p>
               )}
-            </div>
-          ))}
+            </Tag>
+            )
+          })}
         </div>
       )}
     </AppShell>

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, getSessionUser } from '@/lib/supabase/client'
+import BackendDownNotice from '@/components/BackendDownNotice'
 import AppShell from '@/components/layout/AppShell'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import type { User } from '@supabase/supabase-js'
@@ -34,6 +35,7 @@ interface WatchlistRow {
 
 export default function Watchlist() {
   const router = useRouter()
+  const [backendDown, setBackendDown] = useState(false)
   const supabase = createClient()
   const [user, setUser] = useState<User | null>(null)
   const [rows, setRows] = useState<WatchlistRow[]>([])
@@ -46,7 +48,12 @@ export default function Watchlist() {
 
   async function loadWatchlist() {
     setLoading(true)
-    const { data: { user } } = await supabase.auth.getUser()
+    const { user, backendDown: down } = await getSessionUser()
+    if (down) {
+      setBackendDown(true)
+      setLoading(false)
+      return
+    }
     if (!user) {
       router.push('/auth/login')
       return
@@ -112,6 +119,16 @@ export default function Watchlist() {
     router.push('/auth/login')
   }
 
+  // Supabase unreachable: this page's content lives in Postgres, so
+  // there is nothing to show and nowhere useful to redirect to.
+  if (backendDown) {
+    return (
+      <AppShell showTicker={false}>
+        <BackendDownNotice feature="Your watchlist" />
+      </AppShell>
+    )
+  }
+
   return (
     <AppShell userEmail={user?.email} onLogout={handleLogout}>
       <div className="mb-6 fade-in">
@@ -133,7 +150,7 @@ export default function Watchlist() {
             <p className="text-ink-muted text-sm mt-2">Add stocks from an event analysis to monitor them here</p>
             <button
               onClick={() => router.push('/analyze')}
-              className="mt-6 bg-accent hover:bg-accent-bright text-[#0a0d14] font-semibold px-6 py-2 rounded-lg transition"
+              className="mt-6 bg-accent hover:bg-accent-bright text-on-accent font-semibold px-6 py-2 rounded-lg transition"
             >
               Analyze an Event
             </button>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, getSessionUser } from '@/lib/supabase/client'
 import AppShell from '@/components/layout/AppShell'
 import type { User } from '@supabase/supabase-js'
 
@@ -22,6 +22,7 @@ const SECTOR_FILTERS = ['All', 'Banking', 'IT', 'Energy', 'Auto', 'NBFC', 'Realt
 
 export default function Discover() {
   const router = useRouter()
+  const [backendDown, setBackendDown] = useState(false)
   const supabase = createClient()
   const [user, setUser] = useState<User | null>(null)
   const [news, setNews] = useState<NewsItem[]>([])
@@ -29,6 +30,9 @@ export default function Discover() {
   const [refreshing, setRefreshing] = useState(false)
   const [refreshMsg, setRefreshMsg] = useState('')
   const [filter, setFilter] = useState('All')
+  // True when the list came from RSS rather than the stored feed.
+  const [live, setLive] = useState(false)
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
     loadNews()
@@ -36,20 +40,44 @@ export default function Discover() {
 
   async function loadNews() {
     setLoading(true)
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      router.push('/auth/login')
-      return
-    }
+    const { user, backendDown: down } = await getSessionUser()
+    setBackendDown(down)
     setUser(user)
 
-    const { data } = await supabase
-      .from('news_feeds')
-      .select('*')
-      .order('published_at', { ascending: false })
-      .limit(30)
+    // With a session and a reachable database, show the stored feed — those
+    // rows are AI-categorised and accumulate over time.
+    if (user && !down) {
+      const { data } = await supabase
+        .from('news_feeds')
+        .select('*')
+        .order('published_at', { ascending: false })
+        .limit(30)
 
-    setNews(data || [])
+      if (data && data.length > 0) {
+        setNews(data)
+        setLive(false)
+        setLoading(false)
+        return
+      }
+    }
+
+    // Otherwise read the same headlines straight from RSS, categorised by the
+    // rule engine and never stored. Discover stays usable signed out and
+    // while the database is asleep; it just isn't building a stored feed.
+    // Set before the fetch, not after: reaching this point already means the
+    // page is in live mode, and a failed fetch would otherwise leave the
+    // header claiming a stored, AI-categorised feed that isn't there.
+    setLive(true)
+    try {
+      const response = await fetch('/api/news/live')
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Could not load headlines')
+      setNews(data.items || [])
+      setLoadError('')
+    } catch (err: any) {
+      setNews([])
+      setLoadError(err?.message || 'Could not load headlines')
+    }
     setLoading(false)
   }
 
@@ -62,7 +90,17 @@ export default function Discover() {
       if (!response.ok) {
         setRefreshMsg(result.error || 'Refresh failed')
       } else {
-        setRefreshMsg(`Found ${result.inserted} new relevant item(s) from ${result.fetched} fetched`)
+        // A bare "0 new items" reads as a bug. The route reports why the
+        // number is zero — already stored, or filtered as not market
+        // relevant — so say which.
+        const detail = [
+          result.alreadyKnown ? `${result.alreadyKnown} already known` : '',
+          result.skippedIrrelevant ? `${result.skippedIrrelevant} not market relevant` : '',
+        ].filter(Boolean)
+        setRefreshMsg(
+          `Found ${result.inserted} new item(s) from ${result.fetched} headlines` +
+            (detail.length > 0 ? ` (${detail.join(', ')})` : '')
+        )
         await loadNews()
       }
     } catch (err: any) {
@@ -73,6 +111,12 @@ export default function Discover() {
   }
 
   function analyzeNews(item: NewsItem) {
+    if (live) {
+      // No stored row to look up — hand the headline straight to Analyze.
+      const text = `${item.title}${item.description ? '\n\n' + item.description : ''}`
+      router.push(`/analyze?event=${encodeURIComponent(text)}`)
+      return
+    }
     router.push(`/analyze?news_id=${item.id}`)
   }
 
@@ -89,16 +133,47 @@ export default function Discover() {
         <div>
           <p className="text-xs font-mono uppercase tracking-widest text-accent-bright mb-2">Live feed</p>
           <h1 className="text-2xl sm:text-3xl font-bold text-ink mb-1">Market News &amp; Events</h1>
-          <p className="text-ink-muted text-sm">Auto-categorized by AI. Pick one and trace its market impact.</p>
+          <p className="text-ink-muted text-sm">
+            {live
+              ? 'Straight from the wire, categorised on the fly. Pick one and trace its market impact.'
+              : 'Auto-categorized by AI. Pick one and trace its market impact.'}
+          </p>
         </div>
-        <button
-          onClick={handleRefresh}
-          disabled={refreshing}
-          className="flex-shrink-0 bg-accent hover:bg-accent-bright disabled:opacity-50 text-[#0a0d14] font-semibold px-4 py-2.5 rounded-lg text-sm transition"
-        >
-          {refreshing ? 'Fetching…' : '↻ Refresh News'}
-        </button>
+        {/* Refreshing means "fetch and store", which needs both a session and
+            a database. Without them the list is already live on every load,
+            so the button would promise something it cannot do. */}
+        {user && !backendDown ? (
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="flex-shrink-0 bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold px-4 py-2.5 rounded-lg text-sm transition"
+          >
+            {refreshing ? 'Fetching…' : '↻ Refresh News'}
+          </button>
+        ) : (
+          <button
+            onClick={() => loadNews()}
+            disabled={loading}
+            className="flex-shrink-0 border border-border text-ink-muted hover:text-accent hover:border-accent-dim disabled:opacity-50 px-4 py-2.5 rounded-lg text-sm transition"
+          >
+            {loading ? 'Loading…' : '↻ Reload headlines'}
+          </button>
+        )}
       </div>
+
+      {live && (
+        <p className="text-sm text-hold bg-hold-dim border border-hold-dim rounded-lg px-3 py-2 mb-4">
+          {backendDown
+            ? 'Reading headlines directly from the news feed because the database is unreachable. They are categorised by the offline rule engine and not saved.'
+            : 'Reading headlines directly from the news feed. Sign in to build up a stored, AI-categorised feed.'}
+        </p>
+      )}
+
+      {loadError && (
+        <p className="text-sm text-avoid bg-avoid-dim border border-avoid-dim rounded-lg px-3 py-2 mb-4">
+          {loadError}
+        </p>
+      )}
 
       {refreshMsg && (
         <p className="text-sm text-accent-bright bg-accent-dim/40 border border-accent-dim rounded-lg px-3 py-2 mb-6">
@@ -113,7 +188,7 @@ export default function Discover() {
             onClick={() => setFilter(s)}
             className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium border transition ${
               filter === s
-                ? 'bg-accent text-[#0a0d14] border-accent'
+                ? 'bg-accent text-on-accent border-accent'
                 : 'bg-surface text-ink-muted border-border hover:border-border-bright'
             }`}
           >
@@ -130,17 +205,36 @@ export default function Discover() {
         </div>
       ) : filtered.length === 0 ? (
         <div className="panel p-10 text-center text-ink-muted">
-          <p className="text-lg mb-2 text-ink">No news cached yet</p>
-          <p className="text-sm mb-6">
-            Tap <strong className="text-ink">Refresh News</strong> above to fetch and categorize the latest financial headlines.
+          {/* The empty state must offer the same action the header does.
+              Offering "Refresh News" without a session posts to a route that
+              answers Unauthorized, which reads as a broken button. */}
+          <p className="text-lg mb-2 text-ink">
+            {filter !== 'All' ? `No headlines tagged ${filter} right now` : 'No headlines right now'}
           </p>
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="bg-accent hover:bg-accent-bright disabled:opacity-50 text-[#0a0d14] font-semibold px-6 py-2 rounded-lg transition"
-          >
-            {refreshing ? 'Fetching…' : 'Refresh News'}
-          </button>
+          <p className="text-sm mb-6">
+            {filter !== 'All'
+              ? 'Try the All filter, or reload for a fresh pull.'
+              : live
+                ? 'The news feed returned nothing on the last pull. It refreshes on every load.'
+                : 'Tap Refresh News to fetch and categorize the latest financial headlines.'}
+          </p>
+          {user && !backendDown && !live ? (
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold px-6 py-2 rounded-lg transition"
+            >
+              {refreshing ? 'Fetching…' : 'Refresh News'}
+            </button>
+          ) : (
+            <button
+              onClick={() => loadNews()}
+              disabled={loading}
+              className="bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold px-6 py-2 rounded-lg transition"
+            >
+              {loading ? 'Loading…' : 'Reload headlines'}
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-3">
@@ -182,7 +276,7 @@ export default function Discover() {
                 </div>
                 <button
                   onClick={() => analyzeNews(item)}
-                  className="flex-shrink-0 bg-surface-2 hover:bg-accent hover:text-[#0a0d14] border border-border-bright text-ink text-sm font-medium px-4 py-2 rounded-lg transition"
+                  className="flex-shrink-0 bg-surface-2 hover:bg-accent hover:text-on-accent border border-border-bright text-ink text-sm font-medium px-4 py-2 rounded-lg transition"
                 >
                   Analyze
                 </button>

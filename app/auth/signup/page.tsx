@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, describeAuthError, isSupabaseConfigured } from '@/lib/supabase/client'
+import ThemeToggle from '@/components/ui/ThemeToggle'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
@@ -27,7 +28,7 @@ export default function SignUp() {
       })
 
       if (authError) {
-        setError(authError.message)
+        setError(describeAuthError(authError))
         return
       }
 
@@ -35,22 +36,36 @@ export default function SignUp() {
         router.push('/auth/login?message=Check your email to confirm your account')
       }
     } catch (err: any) {
-      setError(err.message || 'An error occurred')
+      setError(describeAuthError(err))
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="min-h-screen grid-backdrop flex items-center justify-center px-4 font-sans text-ink">
+    <div className="relative min-h-screen grid-backdrop flex items-center justify-center px-4 font-sans text-ink">
+      <div className="absolute top-4 right-4">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-md fade-in">
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 mb-3">
             <span className="live-dot" />
-            <span className="font-mono text-2xl font-bold tracking-tight">PULSE</span>
+            <span className="font-mono text-2xl font-bold tracking-tight neon-text">PULSE</span>
           </div>
           <p className="text-ink-muted text-sm">Event-driven stock intelligence for Indian equities</p>
         </div>
+
+        {!isSupabaseConfigured && (
+          <div className="bg-avoid-dim border border-avoid-dim text-avoid px-4 py-3 rounded-lg mb-5 text-sm">
+            This deployment was built without Supabase credentials, so sign-in cannot work yet.
+            Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY on the project and
+            redeploy — they are baked in at build time.{' '}
+            <a href="/api/health" className="underline font-medium">
+              Run diagnostics
+            </a>
+          </div>
+        )}
 
         <div className="panel-elevated shadow-panel p-8">
           {error && (
@@ -98,8 +113,8 @@ export default function SignUp() {
 
             <button
               type="submit"
-              disabled={loading}
-              className="w-full bg-accent hover:bg-accent-bright disabled:opacity-50 text-[#0a0d14] font-semibold py-2.5 px-4 rounded-lg transition"
+              disabled={loading || !isSupabaseConfigured}
+              className="w-full bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold py-2.5 px-4 rounded-lg transition"
             >
               {loading ? 'Creating account…' : 'Create Account'}
             </button>

@@ -42,3 +42,12 @@ yarn-error.log*
 Thumbs.db
 .project
 .classpath
+
+# Generated project report
+# The .docx is a build artifact of the screenshot and document pipeline, not
+# source. It is ~18 MB and is regenerated whenever the report changes, so
+# committing it would add that much to the repository's permanent history on
+# every revision. Keep the file locally; version the code that produces it.
+PULSE_AI_in_Finance_Report.docx
+*.docx
+PULSE_AI_in_Finance_Report.pdf
