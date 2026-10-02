@@ -45,16 +45,24 @@ Unlike generic stock recommendation systems, this platform is **event-driven** -
 - [x] Event classification API
 - [x] Initial commit to GitHub
 
-### Sessions 2-5: Core Features (In Progress)
-- [ ] Stock analysis engines (fundamentals, valuation, technical, risk)
-- [ ] Event opportunity scoring
-- [ ] BUY/HOLD/AVOID decision logic
-- [ ] Counter-argument generation
-- [ ] Results display with visualizations
-- [ ] Saved analyses & history
-- [ ] Watchlist functionality
-- [ ] News feed integration
-- [ ] Testing & deployment
+### Sessions 2-5: Core Features ✅
+- [x] Stock analysis engines (fundamentals, valuation, technical, risk)
+- [x] Event opportunity scoring
+- [x] BUY/HOLD/AVOID decision logic
+- [x] Counter-argument generation
+- [x] Results display with visualizations
+- [x] Saved analyses & history
+- [x] Watchlist functionality
+- [x] News feed integration
+- [x] Testing & deployment
+
+### Sessions 6-8: Rebuild ✅
+- [x] Every data source replaced with a keyless public endpoint
+- [x] Deterministic rule engine, with the language model as an optional layer
+- [x] All simulated figures removed; unsourced values reported as missing
+- [x] Two-sided impact analysis — winners and losers from the same event
+- [x] Neon light and dark themes, set before first paint
+- [x] Full offline test harness (101 checks, no network or keys required)
 
 ## 🚀 Getting Started
 
@@ -161,14 +169,23 @@ Save to User Account
 
 ## 🎨 Design System
 
-**Color Palette:**
-- Primary: #2563EB (Blue)
-- Success: #10B981 (Green)
-- Warning: #F59E0B (Amber)
-- Danger: #EF4444 (Red)
-- Neutral: #6B7280 (Gray)
+Every colour is a CSS custom property defined in `app/globals.css`, so the
+two themes are one token set redefined rather than two sets of components.
+Tailwind reads those properties through `tailwind.config.ts`.
 
-**Responsive:** Mobile-first design with Tailwind breakpoints (md, lg, xl)
+| Token | Dark | Light |
+|---|---|---|
+| `--accent` | `#00e5ff` electric cyan | `#00718c` deepened for contrast |
+| `--buy` | `#3dff9e` lime | darkened equivalent |
+| `--hold` | amber | darkened equivalent |
+| `--avoid` | hot red | darkened equivalent |
+| `--bg` | `#05060a` near-black | near-white |
+
+The theme is applied by a tiny inline script in `app/layout.tsx` before first
+paint, so neither mode flashes the other on load. It defaults to the device
+preference and is remembered per browser.
+
+**Responsive:** mobile-first, verified at 375px and 1280px in both themes.
 
 ## 🔒 Security
 
@@ -180,24 +197,42 @@ Save to User Account
 
 ## 📚 API Endpoints
 
-- `POST /api/analyze` - Classify event and create analysis
-- `GET /api/stocks` - Get stock list (future)
-- `POST /api/watchlist` - Add to watchlist (future)
+| Route | Purpose | Key needed |
+|---|---|---|
+| `POST /api/analyze` | Classify an event, score the affected stocks, build the narrative | No |
+| `POST /api/news/analyze` | Two-sided impact read for one headline | No |
+| `POST /api/news/impact` | Headlines grouped per affected sector and company | No |
+| `GET /api/news/live` | Live headlines from RSS | No |
+| `POST /api/news/fetch` | Fetch and categorise news into the database | No |
+| `GET /api/market/live` | Indices, commodities and FX (`?scope=full` for the heatmap set) | No |
+| `GET /api/market/equities` | Live quotes for every NIFTY 50 constituent | No |
+| `GET /api/market/crypto` | Top cryptocurrencies in INR | No |
+| `GET /api/stocks/quote` | Single-symbol quote | No |
+| `GET /api/stocks/prices` | Batch quotes for a symbol list | No |
+| `GET /api/stocks/history` | Daily closes for a range | No |
+| `GET /api/stocks` | Stock reference data | Supabase |
+| `POST /api/scores` | Persist per-stock scores | Supabase |
+| `GET /api/health` | What this deployment can actually reach | No |
 
 ## 🚧 Roadmap
 
-**Phase 1 (Current):** MVP - Event input, classification, analysis
-**Phase 2:** News feed, historical analysis, advanced scoring
-**Phase 3:** Fundamental analysis, backtesting, portfolio features
-**Phase 4:** Real-time data, ML models, advanced charting
+**Delivered:** event input and classification, transmission analysis, live
+market and news layers, multi-factor scoring over real market data, the
+counter-argument engine, history, watchlist and paper portfolio.
+
+**Next:** intraday rather than daily data; backtesting a classified event
+against the sector's own historical reaction; a trained classifier to
+replace the keyword tables where labelled data exists; alerting on events
+that match a saved thesis.
 
 ## 📄 License
 
 MIT
 
-## 👤 Author
+## 👤 Authors
 
-Built for capstone project at [Your University]
+Pranay and Pranil — academic project for the subject *Artificial
+Intelligence in Finance*.
 
 ## 📞 Support
 
