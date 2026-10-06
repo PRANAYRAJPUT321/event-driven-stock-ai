@@ -89,6 +89,7 @@ export default function StockProfile({ params }: { params: { symbol: string } })
   const [stockId, setStockId] = useState<string | null>(null)
   const [watched, setWatched] = useState(false)
   const [watching, setWatching] = useState(false)
+  const [watchError, setWatchError] = useState<string | null>(null)
   const [searchInput, setSearchInput] = useState('')
 
   const symbol = decodeURIComponent(params.symbol).toUpperCase()
@@ -163,8 +164,12 @@ export default function StockProfile({ params }: { params: { symbol: string } })
   async function handleWatch() {
     if (!user || !stockId || watched) return
     setWatching(true)
+    setWatchError(null)
     const { error } = await supabase.from('watchlists').insert({ user_id: user.id, stock_id: stockId })
-    if (!error) setWatched(true)
+    // A swallowed error here is why the button could look like it did nothing:
+    // pressing it repeatedly with no change and no explanation.
+    if (error) setWatchError(error.message)
+    else setWatched(true)
     setWatching(false)
   }
 
@@ -248,6 +253,9 @@ export default function StockProfile({ params }: { params: { symbol: string } })
                   {(quote.changePct ?? 0).toFixed(2)}% today
                 </p>
               </div>
+            {watchError && (
+              <p className="text-xs text-avoid mt-2 text-right">Could not watchlist: {watchError}</p>
+            )}
               {stockId ? (
                 <button
                   onClick={handleWatch}
@@ -262,7 +270,8 @@ export default function StockProfile({ params }: { params: { symbol: string } })
                 </button>
               ) : (
                 <p className="text-xs text-ink-faint max-w-[220px] text-right">
-                  Not in the scored universe yet — watchlisting works for stocks from an event analysis.
+                  This symbol is not in the stock universe. Run database/schema.sql in Supabase to
+                  create and seed it.
                 </p>
               )}
             </div>

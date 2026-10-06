@@ -79,6 +79,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   const [saving, setSaving] = useState(false)
   const [watchedIds, setWatchedIds] = useState<Set<string>>(new Set())
   const [watchingId, setWatchingId] = useState<string | null>(null)
+  const [watchError, setWatchError] = useState<string | null>(null)
   const [positionedIds, setPositionedIds] = useState<Set<string>>(new Set())
   const [positioningId, setPositioningId] = useState<string | null>(null)
   const [marketContext, setMarketContext] = useState<MarketQuote[]>([])
@@ -196,9 +197,21 @@ export default function EventDetails({ params }: { params: { id: string } }) {
 
   async function handleWatch(stockId: string) {
     if (!userId || watchedIds.has(stockId)) return
+    if (!stockId) {
+      setWatchError(
+        'This analysis has no database row for that stock. Run database/schema.sql in Supabase — ' +
+          'it seeds the stock universe the watchlist links to.'
+      )
+      return
+    }
     setWatchingId(stockId)
     const { error } = await supabase.from('watchlists').insert({ user_id: userId, stock_id: stockId })
-    if (!error) setWatchedIds((prev) => new Set(prev).add(stockId))
+    // Say why it failed rather than leaving the button looking inert.
+    if (error) setWatchError(error.message)
+    else {
+      setWatchError(null)
+      setWatchedIds((prev) => new Set(prev).add(stockId))
+    }
     setWatchingId(null)
   }
 
@@ -488,6 +501,11 @@ export default function EventDetails({ params }: { params: { id: string } }) {
 
         {stocks.length > 0 ? (
           <div className="overflow-x-auto -mx-2">
+            {watchError && (
+              <p className="text-xs text-avoid border border-avoid-dim bg-avoid-dim rounded-lg px-3 py-2 mb-3">
+                {watchError}
+              </p>
+            )}
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border">

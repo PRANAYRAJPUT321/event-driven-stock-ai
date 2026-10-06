@@ -16,6 +16,24 @@ export const dynamic = 'force-dynamic'
 
 const TIMEOUT_MS = 8000
 
+/**
+ * Every table the application reads or writes. Probing them turns "my history
+ * is empty and I don't know why" into a definite answer: either the schema
+ * was never created, or it was and the page is genuinely empty.
+ */
+const REQUIRED_TABLES = [
+  'profiles',
+  'events',
+  'event_analysis',
+  'stocks',
+  'stock_scores',
+  'watchlists',
+  'saved_analyses',
+  'news_feeds',
+  'portfolio_positions',
+  'historical_event_reactions',
+] as const
+
 interface Probe {
   ok: boolean
   status: number | null
@@ -94,6 +112,34 @@ export async function GET(request: Request) {
     )
   }
 
+  // Which tables exist. PostgREST answers 404 with code PGRST205 for a table
+  // it does not know about, which is exactly the "migration never run" case.
+  let schema: { ok: boolean; missing: string[]; checked: number } | null = null
+  if (!supabaseOnly && url && anonKey && checks.supabaseRest?.ok) {
+    const missing: string[] = []
+    await Promise.all(
+      REQUIRED_TABLES.map(async (table) => {
+        try {
+          const response = await fetch(`${url}/rest/v1/${table}?select=*&limit=0`, {
+            headers: {
+              apikey: anonKey,
+              Authorization: `Bearer ${anonKey}`,
+              // Ask for the count only; RLS still applies, and an empty result
+              // from a table that exists is a 200, not a 404.
+              Prefer: 'count=exact',
+            },
+            signal: AbortSignal.timeout(TIMEOUT_MS),
+            cache: 'no-store',
+          })
+          if (response.status === 404) missing.push(table)
+        } catch {
+          // A network blip here should not be reported as a missing table.
+        }
+      })
+    )
+    schema = { ok: missing.length === 0, missing, checked: REQUIRED_TABLES.length }
+  }
+
   const missingEnv = Object.entries(env)
     .filter(([key, present]) => !present && key !== 'ANTHROPIC_API_KEY')
     .map(([key]) => key)
@@ -117,6 +163,11 @@ export async function GET(request: Request) {
     summary =
       'Supabase is reachable but rejected the anon key — it was most likely rotated. ' +
       'Copy the current anon key from the Supabase dashboard into Vercel and redeploy.'
+  } else if (schema && !schema.ok) {
+    summary =
+      `Supabase is reachable but ${schema.missing.length} of ${schema.checked} tables do not exist ` +
+      `(${schema.missing.join(', ')}). Run database/schema.sql in the Supabase SQL editor — ` +
+      'it creates everything in one go and is safe to run twice.'
   } else if (failedChecks.length > 0) {
     summary = `Supabase is healthy. Unreachable from this deployment: ${failedChecks.join(', ')}.`
   } else {
@@ -124,7 +175,7 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json(
-    { summary, env, supabaseHost, checks, checkedAt: new Date().toISOString() },
+    { summary, env, supabaseHost, checks, schema, checkedAt: new Date().toISOString() },
     { headers: { 'Cache-Control': 'no-store' } }
   )
 }
