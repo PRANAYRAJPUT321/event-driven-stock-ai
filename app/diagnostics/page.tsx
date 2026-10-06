@@ -31,6 +31,8 @@ export default function Diagnostics() {
   const [checkedAt, setCheckedAt] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [browserProbes, setBrowserProbes] = useState<Probe[]>([])
+  const [browserLoading, setBrowserLoading] = useState(false)
 
   async function run() {
     setLoading(true)
@@ -49,8 +51,73 @@ export default function Diagnostics() {
     }
   }
 
+  /**
+   * The same hosts, fetched by the browser instead of the server.
+   *
+   * This is the question that matters most. Yahoo rate-limits this
+   * deployment's shared datacenter address, not the data itself — a home
+   * connection is not rate-limited, which is why these pages load instantly
+   * when opened directly. If the endpoint also sends CORS headers, the app
+   * can fetch prices from each visitor's own address and the whole problem
+   * disappears. A failure here is almost always CORS rather than the network,
+   * and that distinction decides the next fix.
+   */
+  async function runBrowserProbes() {
+    setBrowserLoading(true)
+    const targets: { label: string; url: string }[] = [
+      {
+        label: 'Yahoo chart, from your browser',
+        url: 'https://query1.finance.yahoo.com/v8/finance/chart/RELIANCE.NS?range=5d&interval=1d',
+      },
+      {
+        label: 'Yahoo spark, from your browser',
+        url: 'https://query1.finance.yahoo.com/v7/finance/spark?symbols=RELIANCE.NS,TCS.NS&range=5d&interval=1d',
+      },
+      { label: 'Stooq CSV, from your browser', url: 'https://stooq.com/q/l/?s=reliance.in&f=sd2t2ohlcv&h&e=csv' },
+      {
+        label: 'CoinGecko, from your browser (control)',
+        url: 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=inr',
+      },
+    ]
+
+    const results: Probe[] = []
+    for (const t of targets) {
+      const started = Date.now()
+      try {
+        const response = await fetch(t.url, { cache: 'no-store' })
+        const body = await response.text()
+        results.push({
+          label: t.label,
+          url: t.url,
+          ok: response.ok,
+          status: response.status,
+          bytes: body.length,
+          ms: Date.now() - started,
+          sample: body.slice(0, 180).replace(/\s+/g, ' '),
+          usable: response.ok && body.length > 40,
+          note: response.ok ? 'reachable from here' : undefined,
+        })
+      } catch (err: any) {
+        results.push({
+          label: t.label,
+          url: t.url,
+          ok: false,
+          status: null,
+          bytes: 0,
+          ms: Date.now() - started,
+          // A browser reports a CORS refusal as a generic network failure, so
+          // say what it most likely means rather than leaving it cryptic.
+          sample: `${err?.message || 'failed'} — usually means the host sends no CORS header, not that it is unreachable`,
+        })
+      }
+    }
+    setBrowserProbes(results)
+    setBrowserLoading(false)
+  }
+
   useEffect(() => {
     run()
+    runBrowserProbes()
   }, [])
 
   const verdict = (p: Probe) =>
@@ -100,6 +167,42 @@ export default function Diagnostics() {
           <p className="text-sm text-avoid">{error}</p>
         </div>
       )}
+
+      <h2 className="text-sm font-bold text-ink mb-1 mt-2">From your browser</h2>
+      <p className="text-xs text-ink-muted mb-3">
+        Your connection is not rate-limited the way the server&apos;s is. If these succeed, the app
+        can fetch prices from each visitor&apos;s own address instead.
+      </p>
+      <div className="space-y-2 mb-8">
+        {browserLoading && browserProbes.length === 0 ? (
+          <div className="skeleton h-20" />
+        ) : (
+          browserProbes.map((p) => {
+            const v = verdict(p)
+            return (
+              <div key={p.label} className="panel p-4">
+                <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                  <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${v.cls}`}>
+                    {v.text}
+                  </span>
+                  <span className="text-sm font-semibold text-ink">{p.label}</span>
+                  <span className="text-[11px] font-mono text-ink-faint ml-auto mono-tabular">
+                    {p.ms}ms · {p.bytes}B
+                  </span>
+                </div>
+                <p className="text-[11px] font-mono text-ink-muted break-all leading-relaxed">
+                  {p.sample || '(empty response)'}
+                </p>
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      <h2 className="text-sm font-bold text-ink mb-1">From the server</h2>
+      <p className="text-xs text-ink-muted mb-3">
+        What the deployment itself gets back. This is what the app currently relies on.
+      </p>
 
       {loading && probes.length === 0 ? (
         <div className="space-y-2">

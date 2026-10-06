@@ -143,6 +143,50 @@ export async function GET() {
       judge: judgeStooq,
     }),
 
+    // ── Stooq's other door. The .com quote path answers 404 with a landing
+    //    page for every symbol including a US control, which points at the
+    //    host refusing us rather than the symbols being wrong. These test
+    //    whether a different path or the Polish domain behaves differently.
+    probe('Stooq .pl — reliance.in', 'https://stooq.pl/q/l/?s=reliance.in&f=sd2t2ohlcv&h&e=csv', {
+      judge: judgeStooq,
+    }),
+    probe('Stooq daily CSV path', 'https://stooq.com/q/d/l/?s=reliance.in&i=d', { judge: judgeStooq }),
+
+    // ── Yahoo, but fetched by somebody else's server. Yahoo rate-limits this
+    //    deployment's address, not the data; a public relay has a different
+    //    address. No key, no account, and nothing private is being sent —
+    //    these are public quote URLs.
+    probe(
+      'Yahoo via r.jina.ai relay',
+      'https://r.jina.ai/https://query1.finance.yahoo.com/v8/finance/chart/RELIANCE.NS?range=5d&interval=1d'
+    ),
+    probe(
+      'Yahoo via allorigins relay',
+      'https://api.allorigins.win/raw?url=' +
+        encodeURIComponent(
+          'https://query1.finance.yahoo.com/v8/finance/chart/RELIANCE.NS?range=5d&interval=1d'
+        ),
+      { judge: judgeYahooChartish }
+    ),
+    probe(
+      'Yahoo via codetabs relay',
+      'https://api.codetabs.com/v1/proxy?quest=' +
+        encodeURIComponent(
+          'https://query1.finance.yahoo.com/v8/finance/chart/RELIANCE.NS?range=5d&interval=1d'
+        ),
+      { judge: judgeYahooChartish }
+    ),
+
+    // ── The exchanges themselves.
+    probe('NSE India quote API', 'https://www.nseindia.com/api/quote-equity?symbol=RELIANCE', {
+      headers: { Referer: 'https://www.nseindia.com/', Accept: 'application/json' },
+    }),
+    probe(
+      'BSE India',
+      'https://api.bseindia.com/BseIndiaAPI/api/getScripHeaderData/w?Debtflag=&scripcode=500325&seriesid=',
+      { headers: { Referer: 'https://www.bseindia.com/', Accept: 'application/json' } }
+    ),
+
     // ── Controls: sources already known to work from here, so a wholly red
     //    board can be told apart from one specific host refusing us.
     probe(
