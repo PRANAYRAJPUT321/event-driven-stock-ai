@@ -15,6 +15,17 @@
  * Must only be called server-side (the endpoint sends no CORS headers).
  */
 
+import {
+  DEFAULT_CONCURRENCY,
+  fetchQuotesBatch,
+  mapWithConcurrency,
+  recallLastGood,
+  rememberLastGood,
+  yahooRequest,
+  YAHOO_HOSTS,
+  type BatchQuote,
+} from './yahooClient'
+
 export type QuoteCategory = 'domestic' | 'international' | 'commodity' | 'currency'
 
 export interface MarketQuote {
@@ -237,37 +248,85 @@ export function parseChart(body: any, tracked: TrackedSymbol): MarketQuote | nul
 }
 
 async function fetchOne(tracked: TrackedSymbol, revalidateSeconds: number): Promise<MarketQuote> {
-  let lastError: Error | null = null
+  const path =
+    `/v8/finance/chart/${encodeURIComponent(tracked.symbol)}` + `?interval=1d&range=5d`
 
-  // query1 and query2 are independent front-ends for the same API; one being
-  // rate-limited or briefly unhealthy doesn't imply the other is.
-  for (const host of HOSTS) {
-    const url =
-      `https://${host}/v8/finance/chart/${encodeURIComponent(tracked.symbol)}` +
-      `?interval=1d&range=5d`
+  const response = await yahooRequest(path, { revalidate: revalidateSeconds })
+  if (!response.ok) {
+    throw new Error(`${tracked.symbol}: HTTP ${response.status} from ${YAHOO_HOSTS[0]}`)
+  }
+  const quote = parseChart(await response.json(), tracked)
+  if (!quote) throw new Error(`${tracked.symbol}: unexpected response shape`)
+  return quote
+}
 
-    try {
-      const response = await fetch(url, {
-        headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-        next: { revalidate: revalidateSeconds },
-      })
-      if (!response.ok) {
-        lastError = new Error(`${tracked.symbol}: HTTP ${response.status} from ${host}`)
-        continue
+/** Turns a row from the batch quote endpoint into our quote shape. */
+function fromBatch(tracked: TrackedSymbol, row: BatchQuote): MarketQuote | null {
+  const previousClose = row.previousClose ?? row.price
+  if (row.price === null || previousClose === null) return null
+  const change = row.price - previousClose
+  return {
+    symbol: tracked.symbol,
+    name: tracked.name,
+    category: tracked.category,
+    price: row.price,
+    previousClose,
+    change,
+    changePct: previousClose !== 0 ? (change / previousClose) * 100 : 0,
+    currency: row.currency ?? '',
+    asOf: row.marketTimeSeconds !== null
+      ? new Date(row.marketTimeSeconds * 1000).toISOString()
+      : null,
+  }
+}
+
+/**
+ * Resolves a list of symbols with as few upstream requests as possible.
+ *
+ * Batch first — one request covers forty symbols. Whatever the batch did not
+ * answer for falls back to the per-symbol chart endpoint, but with bounded
+ * concurrency, because firing the remainder all at once is what produced the
+ * rate limiting this function exists to avoid.
+ */
+async function resolveQuotes(
+  tracked: TrackedSymbol[],
+  revalidateSeconds: number
+): Promise<{ quotes: MarketQuote[]; failed: string[]; failureReason?: string }> {
+  const quotes: MarketQuote[] = []
+  const failed: string[] = []
+  let failureReason: string | undefined
+
+  let pending = tracked
+  try {
+    const batch = await fetchQuotesBatch(tracked.map((t) => t.symbol))
+    if (batch) {
+      const remaining: TrackedSymbol[] = []
+      for (const t of tracked) {
+        const row = batch.get(t.symbol)
+        const quote = row ? fromBatch(t, row) : null
+        if (quote) quotes.push(quote)
+        else remaining.push(t)
       }
-      const quote = parseChart(await response.json(), tracked)
-      if (!quote) {
-        lastError = new Error(`${tracked.symbol}: unexpected response shape from ${host}`)
-        continue
-      }
-      return quote
-    } catch (err: any) {
-      lastError = new Error(`${tracked.symbol}: ${err?.message || 'request failed'}`)
+      pending = remaining
     }
+  } catch (err: any) {
+    failureReason ??= `batch quote failed: ${err?.message || 'unknown error'}`
   }
 
-  throw lastError ?? new Error(`${tracked.symbol}: no data`)
+  if (pending.length > 0) {
+    const settled = await mapWithConcurrency(pending, DEFAULT_CONCURRENCY, (t) =>
+      fetchOne(t, revalidateSeconds)
+    )
+    settled.forEach((outcome, i) => {
+      if (outcome.status === 'fulfilled') quotes.push(outcome.value)
+      else {
+        failed.push(pending[i].symbol)
+        failureReason ??= String((outcome.reason as any)?.message ?? outcome.reason)
+      }
+    })
+  }
+
+  return { quotes, failed, failureReason }
 }
 
 export interface MarketBarData {
@@ -281,6 +340,9 @@ export interface MarketBarData {
    * DNS failure, which sent people looking in the wrong place.
    */
   failureReason?: string
+  /** True when the upstream failed and the previous good payload is being served. */
+  stale?: boolean
+  staleAgeSeconds?: number
   fetchedAt: string
 }
 
@@ -293,18 +355,27 @@ export async function fetchMarketBar(
   revalidateSeconds = 60,
   symbols: TrackedSymbol[] = TRACKED_SYMBOLS
 ): Promise<MarketBarData> {
-  const settled = await Promise.allSettled(symbols.map((t) => fetchOne(t, revalidateSeconds)))
+  const cacheKey = `bar:${symbols.length}`
+  const { quotes, failed, failureReason } = await resolveQuotes(symbols, revalidateSeconds)
 
-  const quotes: MarketQuote[] = []
-  const failed: string[] = []
-  let failureReason: string | undefined
-  settled.forEach((outcome, i) => {
-    if (outcome.status === 'fulfilled') quotes.push(outcome.value)
-    else {
-      failed.push(symbols[i].symbol)
-      failureReason ??= String(outcome.reason?.message ?? outcome.reason)
+  // A minute where the upstream rate-limits should not blank a page that was
+  // populated a minute ago. Serve the previous good payload, aged and
+  // labelled, and let the UI say how old it is.
+  if (quotes.length === 0) {
+    const stale = recallLastGood<MarketQuote[]>(cacheKey)
+    if (stale) {
+      return {
+        quotes: stale.value,
+        failed,
+        failureReason,
+        stale: true,
+        staleAgeSeconds: stale.ageSeconds,
+        fetchedAt: new Date(Date.now() - stale.ageSeconds * 1000).toISOString(),
+      }
     }
-  })
+  } else {
+    rememberLastGood(cacheKey, quotes)
+  }
 
   return { quotes, failed, failureReason, fetchedAt: new Date().toISOString() }
 }
@@ -323,36 +394,50 @@ export async function fetchEquityQuotes(
   quotes: (MarketQuote & { sector: string })[]
   failed: string[]
   failureReason?: string
+  stale?: boolean
+  staleAgeSeconds?: number
   fetchedAt: string
 }> {
-  const settled = await Promise.allSettled(
-    constituents.map((c) =>
-      fetchOne(
-        // .NS is Yahoo's suffix for the NSE. The category is only used for
-        // grouping in the bar, which equities never appear in.
-        { symbol: `${c.symbol}.NS`, name: c.name, category: 'domestic' },
-        revalidateSeconds
-      )
-    )
+  // .NS is Yahoo's suffix for the NSE. The category is only used for grouping
+  // in the bar, which equities never appear in.
+  const tracked: TrackedSymbol[] = constituents.map((c) => ({
+    symbol: `${c.symbol}.NS`,
+    name: c.name,
+    category: 'domestic',
+  }))
+  const sectorBySymbol = new Map(constituents.map((c) => [`${c.symbol}.NS`, c.sector]))
+  const nseBySymbol = new Map(constituents.map((c) => [`${c.symbol}.NS`, c.symbol]))
+
+  const { quotes: raw, failed: rawFailed, failureReason } = await resolveQuotes(
+    tracked,
+    revalidateSeconds
   )
 
-  const quotes: (MarketQuote & { sector: string })[] = []
-  const failed: string[] = []
-  let failureReason: string | undefined
-  settled.forEach((outcome, i) => {
-    if (outcome.status === 'fulfilled') {
-      quotes.push({
-        ...outcome.value,
-        // Report the NSE symbol, not Yahoo's suffixed form — this is what the
-        // rest of the app links and stores.
-        symbol: constituents[i].symbol,
-        sector: constituents[i].sector,
-      })
-    } else {
-      failed.push(constituents[i].symbol)
-      failureReason ??= String(outcome.reason?.message ?? outcome.reason)
+  const quotes = raw.map((q) => ({
+    ...q,
+    // Report the NSE symbol, not Yahoo's suffixed form — this is what the rest
+    // of the app links and stores.
+    symbol: nseBySymbol.get(q.symbol) ?? q.symbol,
+    sector: sectorBySymbol.get(q.symbol) ?? '',
+  }))
+  const failed = rawFailed.map((s) => nseBySymbol.get(s) ?? s)
+
+  const cacheKey = 'equities'
+  if (quotes.length === 0) {
+    const stale = recallLastGood<(MarketQuote & { sector: string })[]>(cacheKey)
+    if (stale) {
+      return {
+        quotes: stale.value,
+        failed,
+        failureReason,
+        stale: true,
+        staleAgeSeconds: stale.ageSeconds,
+        fetchedAt: new Date(Date.now() - stale.ageSeconds * 1000).toISOString(),
+      }
     }
-  })
+  } else {
+    rememberLastGood(cacheKey, quotes)
+  }
 
   return { quotes, failed, failureReason, fetchedAt: new Date().toISOString() }
 }

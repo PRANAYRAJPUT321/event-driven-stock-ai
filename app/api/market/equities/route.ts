@@ -16,7 +16,7 @@ const REVALIDATE_SECONDS = 60
 
 export async function GET() {
   try {
-    const { quotes, failed, failureReason, fetchedAt } = await fetchEquityQuotes(
+    const { quotes, failed, failureReason, stale, staleAgeSeconds, fetchedAt } = await fetchEquityQuotes(
       NIFTY_50,
       REVALIDATE_SECONDS
     )
@@ -36,10 +36,17 @@ export async function GET() {
     }
 
     return NextResponse.json(
-      { quotes, failed, fetchedAt, total: NIFTY_50.length },
+      {
+        quotes,
+        failed,
+        stale: stale ?? false,
+        staleAgeSeconds: staleAgeSeconds ?? null,
+        fetchedAt,
+        total: NIFTY_50.length,
+      },
       {
         headers: {
-          'Cache-Control': `public, s-maxage=${REVALIDATE_SECONDS}, stale-while-revalidate=300`,
+          'Cache-Control': `public, s-maxage=${REVALIDATE_SECONDS}, stale-while-revalidate=900`,
         },
       }
     )

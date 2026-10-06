@@ -1,4 +1,9 @@
 import { previousSessionClose } from './yahooFinance'
+import {
+  getYahooSession,
+  invalidateYahooSession,
+  yahooRequest,
+} from './yahooClient'
 
 /**
  * Real, sourced metrics for one NSE-listed stock.
@@ -89,18 +94,6 @@ function raw(source: any, ...path: string[]): number | null {
   return num(cursor)
 }
 
-async function yahooFetch(url: string, cookie?: string): Promise<Response> {
-  return fetch(url, {
-    headers: {
-      'User-Agent': USER_AGENT,
-      Accept: 'application/json,text/plain,*/*',
-      ...(cookie ? { Cookie: cookie } : {}),
-    },
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-    cache: 'no-store',
-  })
-}
-
 function mean(values: number[]): number {
   return values.reduce((sum, v) => sum + v, 0) / values.length
 }
@@ -158,9 +151,9 @@ function annualisedVolatility(closes: number[]): number | null {
 /** Everything derivable from a year of daily closes. Keyless and reliable. */
 export async function fetchTechnicals(nseSymbol: string): Promise<TechnicalMetrics | null> {
   const yahooSymbol = `${nseSymbol.toUpperCase()}.NS`
-  const response = await yahooFetch(
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}` +
-      `?range=1y&interval=1d`
+  const response = await yahooRequest(
+    `/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?range=1y&interval=1d`,
+    { revalidate: 300 }
   )
   if (!response.ok) return null
 
@@ -193,46 +186,6 @@ export async function fetchTechnicals(nseSymbol: string): Promise<TechnicalMetri
   }
 }
 
-/** Cached for the lifetime of the lambda — the handshake is the slow part. */
-let cachedSession: { cookie: string; crumb: string; at: number } | null = null
-const SESSION_TTL_MS = 10 * 60 * 1000
-
-async function getCrumb(): Promise<{ cookie: string; crumb: string } | null> {
-  if (cachedSession && Date.now() - cachedSession.at < SESSION_TTL_MS) {
-    return { cookie: cachedSession.cookie, crumb: cachedSession.crumb }
-  }
-  try {
-    const seed = await fetch('https://fc.yahoo.com/', {
-      headers: { 'User-Agent': USER_AGENT },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-      redirect: 'manual',
-      cache: 'no-store',
-    })
-    const setCookies =
-      typeof (seed.headers as any).getSetCookie === 'function'
-        ? (seed.headers as any).getSetCookie()
-        : ([seed.headers.get('set-cookie')].filter(Boolean) as string[])
-    const cookie = setCookies
-      .map((c: string) => c.split(';')[0])
-      .filter(Boolean)
-      .join('; ')
-    if (!cookie) return null
-
-    const crumbResponse = await yahooFetch(
-      'https://query1.finance.yahoo.com/v1/test/getcrumb',
-      cookie
-    )
-    if (!crumbResponse.ok) return null
-    const crumb = (await crumbResponse.text()).trim()
-    if (!crumb || crumb.length > 64 || crumb.includes('<')) return null
-
-    cachedSession = { cookie, crumb, at: Date.now() }
-    return { cookie, crumb }
-  } catch {
-    return null
-  }
-}
-
 const SUMMARY_MODULES = 'price,summaryDetail,defaultKeyStatistics,financialData'
 
 /**
@@ -250,21 +203,21 @@ export async function fetchCompanyFundamentals(nseSymbol: string): Promise<{
 }> {
   const empty = { valuation: null, fundamental: null, beta: null, name: null, currency: null }
 
-  const session = await getCrumb()
+  const session = await getYahooSession()
   if (!session) {
     return { ...empty, note: 'Yahoo did not issue a session for its fundamentals endpoint' }
   }
 
   try {
     const yahooSymbol = `${nseSymbol.toUpperCase()}.NS`
-    const response = await yahooFetch(
-      `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(yahooSymbol)}` +
+    const response = await yahooRequest(
+      `/v10/finance/quoteSummary/${encodeURIComponent(yahooSymbol)}` +
         `?modules=${SUMMARY_MODULES}&crumb=${encodeURIComponent(session.crumb)}`,
-      session.cookie
+      { cookie: session.cookie, attempts: 2 }
     )
     if (!response.ok) {
       // A refused crumb is usually stale; drop it so the next call re-handshakes.
-      if (response.status === 401 || response.status === 403) cachedSession = null
+      if (response.status === 401 || response.status === 403) invalidateYahooSession()
       return { ...empty, note: `Fundamentals endpoint returned HTTP ${response.status}` }
     }
 

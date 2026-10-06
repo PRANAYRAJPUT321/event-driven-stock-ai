@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     // because the bar is read at a glance and the heatmap is read deliberately
     // — and because the wide set costs proportionally more upstream requests.
     const scope = new URL(request.url).searchParams.get('scope')
-    const { quotes, failed, failureReason, fetchedAt } = await fetchMarketBar(
+    const { quotes, failed, failureReason, stale, staleAgeSeconds, fetchedAt } = await fetchMarketBar(
       REVALIDATE_SECONDS,
       scope === 'full' ? HEATMAP_SYMBOLS : undefined
     )
@@ -44,6 +44,8 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         quotes,
+        stale: stale ?? false,
+        staleAgeSeconds: staleAgeSeconds ?? null,
         // Surfaced rather than hidden: a permanently missing symbol should be
         // visible to whoever is debugging, not silently dropped.
         failed,
@@ -55,7 +57,7 @@ export async function GET(request: Request) {
           // Serve from Vercel's edge cache for a minute, and keep serving the
           // last good payload for 5 more while it refreshes — so an upstream
           // hiccup doesn't empty the bar for everyone at once.
-          'Cache-Control': `public, s-maxage=${REVALIDATE_SECONDS}, stale-while-revalidate=300`,
+          'Cache-Control': `public, s-maxage=${REVALIDATE_SECONDS}, stale-while-revalidate=900`,
         },
       }
     )

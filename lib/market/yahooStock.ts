@@ -21,6 +21,7 @@
  *
  * Server-side only.
  */
+import { getYahooSession, invalidateYahooSession, yahooRequest } from './yahooClient'
 
 import { previousSessionClose } from './yahooFinance'
 
@@ -115,16 +116,15 @@ function raw(source: any, ...path: string[]): number | null {
   return num(cursor)
 }
 
+/**
+ * Every call in this module goes through the shared client, so the stock
+ * profile page inherits the same host rotation, 429 backoff and cached
+ * session as the market pages. It used to issue bare fetches, which meant a
+ * rate-limited minute showed the profile as simply broken.
+ */
 async function yahooFetch(url: string, cookie?: string): Promise<Response> {
-  return fetch(url, {
-    headers: {
-      'User-Agent': USER_AGENT,
-      Accept: 'application/json,text/plain,*/*',
-      ...(cookie ? { Cookie: cookie } : {}),
-    },
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-    cache: 'no-store',
-  })
+  const path = url.replace(/^https:\/\/[^/]+/, '')
+  return yahooRequest(path, { cookie, attempts: cookie ? 2 : 3 })
 }
 
 export async function fetchStockHistory(
@@ -223,45 +223,6 @@ export function deriveStats(points: HistoryPoint[]): DerivedStats {
   }
 }
 
-/**
- * Yahoo's cookie + crumb handshake, required by quoteSummary since it stopped
- * serving anonymous callers. Returns null if any step fails — callers treat
- * the fundamentals tier as simply unavailable rather than erroring out.
- */
-async function getCrumb(): Promise<{ cookie: string; crumb: string } | null> {
-  try {
-    const seed = await fetch('https://fc.yahoo.com/', {
-      headers: { 'User-Agent': USER_AGENT },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-      redirect: 'manual',
-      cache: 'no-store',
-    })
-
-    // fc.yahoo.com answers with an error status; the cookie is the point.
-    const setCookies =
-      typeof (seed.headers as any).getSetCookie === 'function'
-        ? (seed.headers as any).getSetCookie()
-        : ([seed.headers.get('set-cookie')].filter(Boolean) as string[])
-
-    const cookie = setCookies
-      .map((c: string) => c.split(';')[0])
-      .filter(Boolean)
-      .join('; ')
-    if (!cookie) return null
-
-    const crumbResponse = await yahooFetch('https://query1.finance.yahoo.com/v1/test/getcrumb', cookie)
-    if (!crumbResponse.ok) return null
-
-    const crumb = (await crumbResponse.text()).trim()
-    // A failed crumb call can return an HTML error page with a 200.
-    if (!crumb || crumb.length > 64 || crumb.includes('<')) return null
-
-    return { cookie, crumb }
-  } catch {
-    return null
-  }
-}
-
 const SUMMARY_MODULES =
   'price,summaryDetail,defaultKeyStatistics,financialData,recommendationTrend'
 
@@ -327,7 +288,7 @@ export async function fetchStockQuote(symbol: string): Promise<StockQuote> {
   }
 
   // Tier 2 — fundamentals and the analyst view. Never fatal.
-  const session = await getCrumb()
+  const session = await getYahooSession()
   if (!session) {
     return {
       ...base,
@@ -342,6 +303,11 @@ export async function fetchStockQuote(symbol: string): Promise<StockQuote> {
       `?modules=${SUMMARY_MODULES}&crumb=${encodeURIComponent(session.crumb)}`
     const summaryResponse = await yahooFetch(summaryUrl, session.cookie)
     if (!summaryResponse.ok) {
+      // A refused crumb is usually a stale one; drop it so the next request
+      // re-handshakes rather than repeating the same rejected call.
+      if (summaryResponse.status === 401 || summaryResponse.status === 403) {
+        invalidateYahooSession()
+      }
       return {
         ...base,
         fundamentalsError: `Fundamentals endpoint returned HTTP ${summaryResponse.status}. Price and chart are unaffected.`,

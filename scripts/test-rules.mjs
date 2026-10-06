@@ -9,7 +9,7 @@
  * directly. No test framework, no new dependencies.
  */
 import { execSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 
@@ -20,23 +20,46 @@ const MODULES = [
   'lib/market/yahooFinance.ts',
   'lib/market/indianEquities.ts',
   'lib/scoring/scoreCalculator.ts',
+  'lib/market/yahooClient.ts',
 ]
 
 // Emitted inside the project so Node resolves the project's node_modules.
 const out = mkdtempSync(path.join(process.cwd(), '.tsbuild-'))
 process.on('exit', () => rmSync(out, { recursive: true, force: true }))
 
+// A throwaway tsconfig rather than bare CLI flags: the modules under test
+// import each other through the project's "@/*" alias, which tsc can only
+// resolve when baseUrl and paths are supplied — and those two have no
+// command-line equivalent.
+const tsconfigPath = path.join(out, 'tsconfig.json')
+writeFileSync(
+  tsconfigPath,
+  JSON.stringify({
+    compilerOptions: {
+      target: 'es2022',
+      module: 'commonjs',
+      moduleResolution: 'node',
+      skipLibCheck: true,
+      esModuleInterop: true,
+      baseUrl: process.cwd(),
+      paths: { '@/*': ['./*'] },
+      outDir: out,
+      rootDir: path.join(process.cwd(), 'lib'),
+      noEmitOnError: false,
+      types: [],
+    },
+    files: MODULES.map((m) => path.join(process.cwd(), m)),
+  })
+)
+
 try {
-  execSync(
-    `./node_modules/.bin/tsc ${MODULES.join(' ')} ` +
-      `--target es2022 --module commonjs --moduleResolution node --skipLibCheck --outDir ${out}`,
-    { stdio: 'pipe' }
-  )
+  execSync(`./node_modules/.bin/tsc --project ${tsconfigPath}`, { stdio: 'pipe' })
 } catch (err) {
   // tsc flags Next's `next: { revalidate }` fetch option outside the Next type
-  // environment. It still emits, so only bail if nothing came out.
+  // environment, and DOM lib types the harness does not need. It still emits,
+  // so bail only when nothing usable came out.
   const stderr = String(err.stdout || '') + String(err.stderr || '')
-  if (!stderr.includes("'next' does not exist in type 'RequestInit'")) {
+  if (!existsSync(path.join(out, 'ai/ruleClassifier.js'))) {
     console.error(stderr)
     process.exit(1)
   }
@@ -52,6 +75,7 @@ const { equitiesForSectors, sectorsWithoutConstituents } =
   require(path.join(out, 'market/indianEquities.js'))
 const { calculateCompositeFromAvailable, recommendationFromComposite } =
   require(path.join(out, 'scoring/scoreCalculator.js'))
+const { mapWithConcurrency, yahooRequest } = require(path.join(out, 'market/yahooClient.js'))
 
 let failures = 0
 let checks = 0
@@ -395,6 +419,61 @@ checkThat('bear case names the missing evidence',
   blind.bearCase.includes('no fundamental, valuation, technical or risk input'))
 checkThat('bull case does not imply components were compared',
   !blind.bullCase.includes('No individual component scores strongly'))
+
+section('upstream request management')
+
+// The defect this guards: every symbol was fetched at once, so a 52-name
+// index meant 52 simultaneous requests to one host, and Yahoo answered 429.
+{
+  let inFlight = 0
+  let peak = 0
+  const items = Array.from({ length: 30 }, (_, i) => i)
+  const results = await mapWithConcurrency(items, 4, async (n) => {
+    inFlight++
+    peak = Math.max(peak, inFlight)
+    await new Promise((r) => setTimeout(r, 5))
+    inFlight--
+    if (n === 7) throw new Error('boom')
+    return n * 2
+  })
+  checkThat('concurrency never exceeds the limit', peak <= 4, `peak was ${peak}`)
+  checkThat('every item is accounted for', results.length === 30)
+  check('results keep input order', results[3].value, 6)
+  check('one failure does not sink the batch', results[7].status, 'rejected')
+  check('work continues past a failure', results[29].value, 58)
+}
+
+// A 429 must be retried, not surfaced immediately.
+{
+  const calls = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    calls.push(String(url))
+    if (calls.length < 3) return { ok: false, status: 429, json: async () => ({}) }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) }
+  }
+  const response = await yahooRequest('/v8/finance/chart/TEST', { attempts: 3 })
+  globalThis.fetch = realFetch
+  check('a 429 is retried until it succeeds', response.status, 200)
+  check('it took three attempts', calls.length, 3)
+  checkThat('retries rotate to the other host',
+    new Set(calls.map((u) => new URL(u).host)).size === 2,
+    calls.join(' | '))
+}
+
+// A 404 is a real answer; retrying it just wastes the budget.
+{
+  const calls = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    calls.push(String(url))
+    return { ok: false, status: 404, json: async () => ({}) }
+  }
+  const response = await yahooRequest('/v8/finance/chart/NOPE', { attempts: 3 })
+  globalThis.fetch = realFetch
+  check('a 404 is returned without retrying', calls.length, 1)
+  check('…and the status is passed through', response.status, 404)
+}
 
 console.log(
   failures === 0
