@@ -113,6 +113,10 @@ export default function Markets() {
   // app falls back across several, and "which feed answered" has been the
   // single most useful thing to know when the grid looked wrong.
   const [sources, setSources] = useState<string[]>([])
+  // How many tiles came from memory rather than this refresh. A rate-limited
+  // feed fills the grid gradually, and saying so is better than implying
+  // every tile is a second old.
+  const [remembered, setRemembered] = useState(0)
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>('equities')
 
@@ -160,6 +164,7 @@ export default function Markets() {
       setStaleAgeSeconds(
         marketRes.value.body.stale ? marketRes.value.body.staleAgeSeconds ?? null : null
       )
+      setRemembered(marketRes.value.body.fromMemory ?? 0)
       setSources(
         Array.from(
           new Set(
@@ -276,7 +281,7 @@ export default function Markets() {
             >
               {staleAgeSeconds === null && <span className="live-dot" />}
               {staleAgeSeconds !== null
-                ? `Last good prices · ${
+                ? `${remembered} tile${remembered === 1 ? '' : 's'} up to ${
                     staleAgeSeconds < 90
                       ? `${staleAgeSeconds}s`
                       : `${Math.round(staleAgeSeconds / 60)}m`

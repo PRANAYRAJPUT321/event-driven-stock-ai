@@ -16,7 +16,7 @@ const REVALIDATE_SECONDS = 60
 
 export async function GET() {
   try {
-    const { quotes, failed, failureReason, stale, staleAgeSeconds, fetchedAt } = await fetchEquityQuotes(
+    const { quotes, failed, failureReason, stale, staleAgeSeconds, fromMemory, fetchedAt } = await fetchEquityQuotes(
       NIFTY_50,
       REVALIDATE_SECONDS
     )
@@ -41,6 +41,7 @@ export async function GET() {
         failed,
         stale: stale ?? false,
         staleAgeSeconds: staleAgeSeconds ?? null,
+        fromMemory: fromMemory ?? 0,
         fetchedAt,
         total: NIFTY_50.length,
       },

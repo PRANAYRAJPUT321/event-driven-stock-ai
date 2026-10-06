@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     // because the bar is read at a glance and the heatmap is read deliberately
     // — and because the wide set costs proportionally more upstream requests.
     const scope = new URL(request.url).searchParams.get('scope')
-    const { quotes, failed, failureReason, stale, staleAgeSeconds, fetchedAt } = await fetchMarketBar(
+    const { quotes, failed, failureReason, stale, staleAgeSeconds, fromMemory, fetchedAt } = await fetchMarketBar(
       REVALIDATE_SECONDS,
       scope === 'full' ? HEATMAP_SYMBOLS : undefined
     )
@@ -46,6 +46,7 @@ export async function GET(request: Request) {
         quotes,
         stale: stale ?? false,
         staleAgeSeconds: staleAgeSeconds ?? null,
+        fromMemory: fromMemory ?? 0,
         // Surfaced rather than hidden: a permanently missing symbol should be
         // visible to whoever is debugging, not silently dropped.
         failed,

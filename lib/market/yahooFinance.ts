@@ -299,6 +299,64 @@ function fromBatch(tracked: TrackedSymbol, row: BatchQuote): MarketQuote | null 
   }
 }
 
+/**
+ * The last good quote for each individual symbol.
+ *
+ * The all-or-nothing cache this replaces threw away partial success: when the
+ * upstream was rate-limiting and answered five symbols out of fifty-two, those
+ * five were discarded because the payload "failed". Keeping them per symbol
+ * means a trickle accumulates — five this minute, five more the next — until
+ * the grid is full, and it stays full as long as the trickle continues. On a
+ * feed that refuses volume but not existence, this is the difference between
+ * a blank page and a working one.
+ *
+ * Entries carry their own age so the caller can say which tiles are fresh.
+ */
+const quoteMemory = new Map<string, { quote: MarketQuote; at: number }>()
+/** Long enough to ride out a bad spell, short enough that nothing goes stale unnoticed. */
+const QUOTE_MEMORY_TTL_MS = 30 * 60 * 1000
+
+/**
+ * Folds this fetch's successes into memory and returns the union: everything
+ * just fetched, plus anything remembered that the fetch did not cover.
+ */
+function mergeWithMemory(
+  tracked: TrackedSymbol[],
+  fresh: MarketQuote[]
+): { quotes: MarketQuote[]; fromMemory: number; oldestAgeSeconds: number } {
+  const now = Date.now()
+  const freshBySymbol = new Map(fresh.map((q) => [q.symbol, q]))
+
+  for (const quote of fresh) quoteMemory.set(quote.symbol, { quote, at: now })
+
+  const quotes: MarketQuote[] = []
+  let fromMemory = 0
+  let oldest = 0
+
+  for (const t of tracked) {
+    const justFetched = freshBySymbol.get(t.symbol)
+    if (justFetched) {
+      quotes.push(justFetched)
+      continue
+    }
+    const remembered = quoteMemory.get(t.symbol)
+    if (!remembered) continue
+    const age = now - remembered.at
+    if (age > QUOTE_MEMORY_TTL_MS) {
+      quoteMemory.delete(t.symbol)
+      continue
+    }
+    quotes.push(remembered.quote)
+    fromMemory++
+    oldest = Math.max(oldest, age)
+  }
+
+  return { quotes, fromMemory, oldestAgeSeconds: Math.round(oldest / 1000) }
+}
+
+/** Where the next throttled sweep begins. See the rotation note below. */
+let fallbackCursor = 0
+
 /** Previous closes keyed by NSE symbol. Valid for the session, not the minute. */
 const stooqPrevClose = new Map<string, { value: number; series: number[]; at: number }>()
 const PREV_CLOSE_TTL_MS = 6 * 60 * 60 * 1000
@@ -435,15 +493,27 @@ async function resolveQuotes(
     }
   }
 
-  // 4. Last resort: one request per symbol, throttled.
+  // 4. Last resort: one request per symbol, throttled — and rotated.
+  //
+  //    Rotation matters more than it looks. An upstream that accepts only the
+  //    first few requests of each burst will otherwise answer the same few
+  //    symbols forever, because the list is always walked in the same order:
+  //    the first five tiles fill and the other forty-seven never get a turn,
+  //    however long you wait. Starting at a moving offset gives every symbol
+  //    its share, so with the per-symbol memory above the grid fills in over
+  //    successive refreshes instead of being permanently five tiles wide.
   if (pending.length > 0) {
-    const settled = await mapWithConcurrency(pending, DEFAULT_CONCURRENCY, (t) =>
+    const offset = fallbackCursor % pending.length
+    fallbackCursor = (fallbackCursor + Math.max(1, DEFAULT_CONCURRENCY)) % Math.max(1, pending.length)
+    const rotated = [...pending.slice(offset), ...pending.slice(0, offset)]
+
+    const settled = await mapWithConcurrency(rotated, DEFAULT_CONCURRENCY, (t) =>
       fetchOne(t, revalidateSeconds)
     )
     settled.forEach((outcome, i) => {
       if (outcome.status === 'fulfilled') quotes.push(outcome.value)
       else {
-        failed.push(pending[i].symbol)
+        failed.push(rotated[i].symbol)
         failureReason ??= String((outcome.reason as any)?.message ?? outcome.reason)
       }
     })
@@ -463,9 +533,11 @@ export interface MarketBarData {
    * DNS failure, which sent people looking in the wrong place.
    */
   failureReason?: string
-  /** True when the upstream failed and the previous good payload is being served. */
+  /** True when some tiles came from memory rather than this fetch. */
   stale?: boolean
   staleAgeSeconds?: number
+  /** How many of the quotes were remembered rather than just fetched. */
+  fromMemory?: number
   fetchedAt: string
 }
 
@@ -478,29 +550,22 @@ export async function fetchMarketBar(
   revalidateSeconds = 60,
   symbols: TrackedSymbol[] = TRACKED_SYMBOLS
 ): Promise<MarketBarData> {
-  const cacheKey = `bar:${symbols.length}`
-  const { quotes, failed, failureReason } = await resolveQuotes(symbols, revalidateSeconds)
+  const { quotes: fresh, failed, failureReason } = await resolveQuotes(symbols, revalidateSeconds)
 
-  // A minute where the upstream rate-limits should not blank a page that was
-  // populated a minute ago. Serve the previous good payload, aged and
-  // labelled, and let the UI say how old it is.
-  if (quotes.length === 0) {
-    const stale = recallLastGood<MarketQuote[]>(cacheKey)
-    if (stale) {
-      return {
-        quotes: stale.value,
-        failed,
-        failureReason,
-        stale: true,
-        staleAgeSeconds: stale.ageSeconds,
-        fetchedAt: new Date(Date.now() - stale.ageSeconds * 1000).toISOString(),
-      }
-    }
-  } else {
-    rememberLastGood(cacheKey, quotes)
+  // Fold this fetch into what is already known. A rate-limiting upstream that
+  // answers a handful of symbols a minute now builds the grid up over
+  // successive refreshes instead of each attempt discarding the last.
+  const { quotes, fromMemory, oldestAgeSeconds } = mergeWithMemory(symbols, fresh)
+
+  return {
+    quotes,
+    failed,
+    failureReason,
+    stale: fromMemory > 0,
+    staleAgeSeconds: fromMemory > 0 ? oldestAgeSeconds : undefined,
+    fromMemory,
+    fetchedAt: new Date().toISOString(),
   }
-
-  return { quotes, failed, failureReason, fetchedAt: new Date().toISOString() }
 }
 
 /**
@@ -519,6 +584,7 @@ export async function fetchEquityQuotes(
   failureReason?: string
   stale?: boolean
   staleAgeSeconds?: number
+  fromMemory?: number
   fetchedAt: string
 }> {
   // .NS is Yahoo's suffix for the NSE. The category is only used for grouping
@@ -536,33 +602,29 @@ export async function fetchEquityQuotes(
     revalidateSeconds
   )
 
-  const quotes = raw.map((q) => ({
+  // Report the NSE symbol, not Yahoo's suffixed form — this is what the rest
+  // of the app links and stores.
+  const failed = rawFailed.map((s) => nseBySymbol.get(s) ?? s)
+
+  // Same accumulation as the bar: a feed that answers five constituents a
+  // minute fills the grid over a few refreshes rather than each attempt
+  // throwing away what the last one managed to get.
+  const merged = mergeWithMemory(tracked, raw)
+  const withSector = merged.quotes.map((q) => ({
     ...q,
-    // Report the NSE symbol, not Yahoo's suffixed form — this is what the rest
-    // of the app links and stores.
     symbol: nseBySymbol.get(q.symbol) ?? q.symbol,
     sector: sectorBySymbol.get(q.symbol) ?? '',
   }))
-  const failed = rawFailed.map((s) => nseBySymbol.get(s) ?? s)
 
-  const cacheKey = 'equities'
-  if (quotes.length === 0) {
-    const stale = recallLastGood<(MarketQuote & { sector: string })[]>(cacheKey)
-    if (stale) {
-      return {
-        quotes: stale.value,
-        failed,
-        failureReason,
-        stale: true,
-        staleAgeSeconds: stale.ageSeconds,
-        fetchedAt: new Date(Date.now() - stale.ageSeconds * 1000).toISOString(),
-      }
-    }
-  } else {
-    rememberLastGood(cacheKey, quotes)
+  return {
+    quotes: withSector,
+    failed,
+    failureReason,
+    stale: merged.fromMemory > 0,
+    staleAgeSeconds: merged.fromMemory > 0 ? merged.oldestAgeSeconds : undefined,
+    fromMemory: merged.fromMemory,
+    fetchedAt: new Date().toISOString(),
   }
-
-  return { quotes, failed, failureReason, fetchedAt: new Date().toISOString() }
 }
 
 /** Single-symbol lookup for the stock profile page. Throws on failure. */
