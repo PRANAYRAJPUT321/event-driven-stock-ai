@@ -106,6 +106,14 @@ export async function GET(request: Request) {
       'https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?interval=1d&range=1d',
       { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }
     )
+    // Which Yahoo paths this deployment can actually use. They fail
+    // independently: the crumbed endpoints routinely refuse datacenter IPs
+    // while the keyless ones answer, and knowing which is which is the
+    // difference between "the feed is down" and "we asked the wrong way".
+    checks.yahooSparkBatch = await probe(
+      'https://query1.finance.yahoo.com/v7/finance/spark?symbols=RELIANCE.NS,TCS.NS&range=5d&interval=1d',
+      { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }
+    )
     checks.googleNewsRss = await probe(
       'https://news.google.com/rss/search?q=nifty&hl=en-IN&gl=IN&ceid=IN:en',
       { 'User-Agent': 'Mozilla/5.0' }

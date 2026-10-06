@@ -75,7 +75,8 @@ const { equitiesForSectors, sectorsWithoutConstituents } =
   require(path.join(out, 'market/indianEquities.js'))
 const { calculateCompositeFromAvailable, recommendationFromComposite } =
   require(path.join(out, 'scoring/scoreCalculator.js'))
-const { mapWithConcurrency, yahooRequest } = require(path.join(out, 'market/yahooClient.js'))
+const { mapWithConcurrency, yahooRequest, fetchSparkBatch } =
+  require(path.join(out, 'market/yahooClient.js'))
 
 let failures = 0
 let checks = 0
@@ -501,6 +502,56 @@ section('headline de-duplication')
 
   const identical = parseRssFeed(feed('Nifty ends higher', 'Nifty ends higher'), 'Google News')
   check('an exactly identical description is dropped', identical[0].description, null)
+}
+
+section('spark batch — the crumbless path')
+
+// The grid is 52 symbols. One request for all of them is the difference
+// between working and being rate limited from a datacenter IP.
+{
+  const calls = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    const u = String(url)
+    calls.push(u)
+    const syms = decodeURIComponent(new URL(u).searchParams.get('symbols') || '').split(',')
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        spark: {
+          result: syms.map((symbol) => ({
+            symbol,
+            response: [{
+              meta: { symbol, regularMarketPrice: 103, currency: 'INR', regularMarketTime: 1700000000 },
+              timestamp: [1, 2, 3],
+              indicators: { quote: [{ close: [100, 101, 103] }] },
+            }],
+          })),
+          error: null,
+        },
+      }),
+    }
+  }
+  const symbols = Array.from({ length: 52 }, (_, i) => `SYM${i}.NS`)
+  const found = await fetchSparkBatch(symbols)
+  globalThis.fetch = realFetch
+
+  check('every symbol comes back', found.size, 52)
+  checkThat('52 symbols cost two requests, not 52', calls.length === 2, `took ${calls.length}`)
+  checkThat('no crumb is involved', calls.every((u) => !u.includes('crumb')))
+  checkThat('the payload is chart-shaped, so the same parser reads it',
+    Boolean(found.get('SYM0.NS')?.chart?.result?.[0]?.meta))
+}
+
+// A spark outage must be reported as "this path is unavailable", not as every
+// symbol being individually missing — the caller falls through on null.
+{
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async () => ({ ok: false, status: 429, json: async () => ({}) })
+  const found = await fetchSparkBatch(['A.NS', 'B.NS'])
+  globalThis.fetch = realFetch
+  check('a total spark failure returns null', found, null)
 }
 
 console.log(

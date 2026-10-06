@@ -18,6 +18,7 @@
 import {
   DEFAULT_CONCURRENCY,
   fetchQuotesBatch,
+  fetchSparkBatch,
   mapWithConcurrency,
   recallLastGood,
   rememberLastGood,
@@ -297,22 +298,52 @@ async function resolveQuotes(
   let failureReason: string | undefined
 
   let pending = tracked
+
+  // 1. Spark first: one request per forty symbols, no session required. This
+  //    is the path that keeps the grid inside Yahoo's tolerance.
   try {
-    const batch = await fetchQuotesBatch(tracked.map((t) => t.symbol))
-    if (batch) {
+    const spark = await fetchSparkBatch(
+      tracked.map((t) => t.symbol),
+      '5d',
+      '1d',
+      revalidateSeconds
+    )
+    if (spark) {
       const remaining: TrackedSymbol[] = []
-      for (const t of tracked) {
-        const row = batch.get(t.symbol)
-        const quote = row ? fromBatch(t, row) : null
+      for (const t of pending) {
+        const payload = spark.get(t.symbol)
+        const quote = payload ? parseChart(payload, t) : null
         if (quote) quotes.push(quote)
         else remaining.push(t)
       }
       pending = remaining
     }
   } catch (err: any) {
-    failureReason ??= `batch quote failed: ${err?.message || 'unknown error'}`
+    failureReason ??= `spark batch failed: ${err?.message || 'unknown error'}`
   }
 
+  // 2. The crumbed quote endpoint, for whatever spark did not answer for.
+  //    Kept because it carries fields spark does not and still works from
+  //    some networks, but it is no longer the only batch path.
+  if (pending.length > 0) {
+    try {
+      const batch = await fetchQuotesBatch(pending.map((t) => t.symbol))
+      if (batch) {
+        const remaining: TrackedSymbol[] = []
+        for (const t of pending) {
+          const row = batch.get(t.symbol)
+          const quote = row ? fromBatch(t, row) : null
+          if (quote) quotes.push(quote)
+          else remaining.push(t)
+        }
+        pending = remaining
+      }
+    } catch (err: any) {
+      failureReason ??= `batch quote failed: ${err?.message || 'unknown error'}`
+    }
+  }
+
+  // 3. Last resort: one request per symbol, throttled.
   if (pending.length > 0) {
     const settled = await mapWithConcurrency(pending, DEFAULT_CONCURRENCY, (t) =>
       fetchOne(t, revalidateSeconds)

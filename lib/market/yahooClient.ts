@@ -161,6 +161,69 @@ export function invalidateYahooSession(): void {
   cachedSession = null
 }
 
+// ── Spark: the batch endpoint that needs no session ─────────────────────────
+
+/**
+ * `v7/finance/spark` takes a comma-separated symbol list and returns, for each
+ * one, the same `meta` block and close series the chart endpoint gives — in a
+ * single request, and without a crumb.
+ *
+ * That last part is why it is tried first. The crumbed quote endpoint works
+ * from a laptop and routinely does not from a datacenter IP, which is what a
+ * serverless function has: the handshake fails, every symbol falls through to
+ * its own chart request, and fifty-two of those from one address is exactly
+ * the burst Yahoo answers with 429. Spark collapses the whole grid into one
+ * or two requests that need no session at all, so the common path never
+ * approaches the rate limit.
+ *
+ * Returns the raw per-symbol payloads; the caller parses them with the same
+ * parser it uses for the chart endpoint, because the shape is the same.
+ */
+export async function fetchSparkBatch(
+  symbols: string[],
+  range = '5d',
+  interval = '1d',
+  revalidateSeconds = 60
+): Promise<Map<string, any> | null> {
+  if (symbols.length === 0) return new Map()
+
+  const chunks: string[][] = []
+  for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
+    chunks.push(symbols.slice(i, i + BATCH_SIZE))
+  }
+
+  const found = new Map<string, any>()
+  let anySucceeded = false
+
+  const settled = await mapWithConcurrency(chunks, 2, async (chunk) => {
+    const path =
+      `/v7/finance/spark?symbols=${encodeURIComponent(chunk.join(','))}` +
+      `&range=${encodeURIComponent(range)}&interval=${encodeURIComponent(interval)}`
+    const response = await yahooRequest(path, { revalidate: revalidateSeconds })
+    if (!response.ok) throw new Error(`spark: HTTP ${response.status}`)
+    const body = await response.json()
+    const rows: any[] = body?.spark?.result ?? []
+    return rows
+  })
+
+  for (const outcome of settled) {
+    if (outcome.status !== 'fulfilled') continue
+    anySucceeded = true
+    for (const row of outcome.value) {
+      const symbol = typeof row?.symbol === 'string' ? row.symbol : null
+      // Each entry wraps a payload shaped exactly like a chart response, so
+      // it can go straight through parseChart.
+      const payload = row?.response?.[0]
+      if (!symbol || !payload) continue
+      found.set(symbol, { chart: { result: [payload], error: null } })
+    }
+  }
+
+  // Nothing answered at all: tell the caller the path is unavailable rather
+  // than reporting every symbol as individually missing.
+  return anySucceeded ? found : null
+}
+
 // ── Batch quotes ────────────────────────────────────────────────────────────
 
 export interface BatchQuote {
