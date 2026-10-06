@@ -70,7 +70,7 @@ function AnalyzeForm() {
     loadNews()
   }, [newsId, presetEvent])
 
-  const handleAnalyze = async (e: React.FormEvent) => {
+  const handleAnalyze = async (e: React.FormEvent, symbols?: string[]) => {
     e.preventDefault()
     if (!eventText.trim()) {
       setError('Please enter an event')
@@ -84,7 +84,10 @@ function AnalyzeForm() {
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ event: eventText }),
+        body: JSON.stringify({
+          event: eventText,
+          ...(symbols && symbols.length > 0 ? { symbols } : {}),
+        }),
       })
 
       const data = await response.json()
@@ -117,7 +120,13 @@ function AnalyzeForm() {
           >
             ← Analyze another event
           </button>
-          <AnalysisResult payload={unsavedResult} />
+          <AnalysisResult
+            payload={unsavedResult}
+            onReanalyse={(symbols) =>
+              handleAnalyze({ preventDefault: () => {} } as React.FormEvent, symbols)
+            }
+            reanalysing={loading}
+          />
         </div>
       </AppShell>
     )

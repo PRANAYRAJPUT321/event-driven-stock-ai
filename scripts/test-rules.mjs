@@ -475,6 +475,34 @@ section('upstream request management')
   check('…and the status is passed through', response.status, 404)
 }
 
+section('headline de-duplication')
+
+// Google News repeats the headline inside <description>, which produced
+// analysis pages with the same sentence printed three times.
+{
+  const feed = (title, description) => `<?xml version="1.0"?><rss version="2.0"><channel>` +
+    `<item><title>${title}</title><link>https://example.com/a</link>` +
+    `<pubDate>Wed, 01 Oct 2026 09:30:00 GMT</pubDate>` +
+    `<description>${description}</description></item></channel></rss>`
+
+  const repeated = parseRssFeed(
+    feed('RBI may hike repo rate by 25 bps in October meet: Economists',
+         '&lt;a href="x"&gt;RBI may hike repo rate by 25 bps in October meet: Economists&lt;/a&gt;&amp;nbsp;Fortune India'),
+    'Google News')
+  check('a description that just repeats the headline is dropped',
+    repeated[0].description, null)
+
+  const real = parseRssFeed(
+    feed('RBI holds repo rate at 6.50%',
+         'The monetary policy committee voted five to one to keep the rate unchanged, citing food inflation.'),
+    'Google News')
+  checkThat('a description that adds information is kept',
+    real[0].description !== null && real[0].description.includes('five to one'))
+
+  const identical = parseRssFeed(feed('Nifty ends higher', 'Nifty ends higher'), 'Google News')
+  check('an exactly identical description is dropped', identical[0].description, null)
+}
+
 console.log(
   failures === 0
     ? `\n✓ ${checks} checks passed`

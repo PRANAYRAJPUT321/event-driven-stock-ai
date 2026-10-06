@@ -9,6 +9,8 @@ import {
 } from '@/lib/market/historicalEngine'
 import {
   equitiesForSectors,
+  findEquity,
+  NIFTY_50,
   sectorsWithoutConstituents,
   type EquityConstituent,
 } from '@/lib/market/indianEquities'
@@ -23,11 +25,30 @@ import {
   scoreValuation,
 } from '@/lib/scoring/scoreCalculator'
 
+/** When the engine picks the companies itself. */
 const MAX_STOCKS_ANALYZED = 6
+/** When the user picks them, they get a larger budget — it is their request. */
+const MAX_STOCKS_REQUESTED = 12
 
 export async function POST(request: NextRequest) {
   try {
-    const { event } = await request.json()
+    const body = await request.json()
+    const event = body?.event
+
+    // An explicit company list beats the engine's own sector mapping: the
+    // reader often knows which names they care about, and "RBI hikes rates"
+    // scored against the first six banks is a weaker answer than the same
+    // event scored against the six names they actually hold.
+    const requestedSymbols: string[] = Array.isArray(body?.symbols)
+      ? Array.from(
+          new Set<string>(
+            (body.symbols as unknown[])
+              .filter((s): s is string => typeof s === 'string')
+              .map((s) => s.trim().toUpperCase())
+              .filter(Boolean)
+          )
+        ).slice(0, MAX_STOCKS_REQUESTED)
+      : []
 
     if (!event || !event.trim()) {
       return NextResponse.json({ error: 'Event text is required' }, { status: 400 })
@@ -115,7 +136,16 @@ export async function POST(request: NextRequest) {
     // do not resolve on any exchange, and every symbol here is fetched live
     // from Yahoo, where a wrong ticker is simply a 404.
     const sectors = classification.affected_sectors ?? []
-    const candidates: EquityConstituent[] = equitiesForSectors(sectors, MAX_STOCKS_ANALYZED)
+
+    // Symbols the caller named that are not in the universe are reported
+    // rather than silently dropped — a typo should say so.
+    const requested = requestedSymbols
+      .map((symbol) => findEquity(symbol))
+      .filter((e): e is EquityConstituent => e !== undefined)
+    const unknownSymbols = requestedSymbols.filter((symbol) => !findEquity(symbol))
+
+    const candidates: EquityConstituent[] =
+      requested.length > 0 ? requested : equitiesForSectors(sectors, MAX_STOCKS_ANALYZED)
     // Named by the classification but absent from this universe — reported so
     // the page can say "no NIFTY 50 name is exposed to Aviation" rather than
     // quietly showing an unrelated company in its place.
@@ -295,6 +325,18 @@ export async function POST(request: NextRequest) {
         counterArgument,
         eventImpactScore,
         unmatchedSectors,
+        unknownSymbols,
+        /** Whether the caller chose the companies or the engine did. */
+        selectionMode: requested.length > 0 ? 'requested' : 'derived',
+        /**
+         * Every constituent in the affected sectors, so the page can offer the
+         * full choice rather than only the handful it happened to score.
+         */
+        sectorUniverse: NIFTY_50.filter((s) => sectors.includes(s.sector)).map((s) => ({
+          symbol: s.symbol,
+          name: s.name,
+          sector: s.sector,
+        })),
         stocks: stockResults.map((r) => ({
           symbol: r.stock.symbol,
           name: r.stock.name,

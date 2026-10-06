@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import ScoreGauge from '@/components/charts/ScoreGauge'
 import TransmissionFlow from '@/components/charts/TransmissionFlow'
@@ -33,6 +34,9 @@ export interface AnalysisPayload {
     finalReasoning: string
   } | null
   unmatchedSectors?: string[]
+  unknownSymbols?: string[]
+  selectionMode?: 'requested' | 'derived'
+  sectorUniverse?: { symbol: string; name: string; sector: string }[]
   stocks: {
     symbol: string
     name: string
@@ -47,6 +51,12 @@ export interface AnalysisPayload {
     /** Share of the scoring weight that had real data behind it, 0-1. */
     coverage?: number
     excludedFactors?: string[]
+    price?: number | null
+    changePct?: number | null
+    peRatio?: number | null
+    rsi14?: number | null
+    volatilityPct?: number | null
+    dataNotes?: string[]
   }[]
 }
 
@@ -58,7 +68,16 @@ export interface AnalysisPayload {
  * explicit that it is not saved — the alternative (refusing to analyse
  * because the database is asleep) withholds a result the app already has.
  */
-export default function AnalysisResult({ payload }: { payload: AnalysisPayload }) {
+export default function AnalysisResult({
+  payload,
+  onReanalyse,
+  reanalysing,
+}: {
+  payload: AnalysisPayload
+  /** Re-runs the same event against a company set the reader chose. */
+  onReanalyse?: (symbols: string[]) => void
+  reanalysing?: boolean
+}) {
   const { classification, historical, counterArgument, stocks } = payload
   const top = stocks[0]
   // A score built only from the event is the same number for every name in the
@@ -66,6 +85,13 @@ export default function AnalysisResult({ payload }: { payload: AnalysisPayload }
   // company-level verdict that was never computed.
   const unrated = stocks.filter((s) => s.recommendation === 'UNRATED').length
   const unmatched = payload.unmatchedSectors ?? []
+  const universe = payload.sectorUniverse ?? []
+  const [picked, setPicked] = useState<string[]>(stocks.map((s) => s.symbol))
+  const [picking, setPicking] = useState(false)
+  const togglePick = (symbol: string) =>
+    setPicked((prev) =>
+      prev.includes(symbol) ? prev.filter((s) => s !== symbol) : [...prev, symbol]
+    )
 
   return (
     <div className="fade-in">
@@ -170,7 +196,76 @@ export default function AnalysisResult({ payload }: { payload: AnalysisPayload }
       />
 
       <div className="panel p-7 mb-6">
-        <h2 className="text-sm font-bold text-ink mb-4">Scored Stocks ({stocks.length})</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div>
+            <h2 className="text-sm font-bold text-ink">Scored Stocks ({stocks.length})</h2>
+            <p className="text-xs text-ink-faint mt-0.5">
+              {payload.selectionMode === 'requested'
+                ? 'Companies you chose.'
+                : `Chosen from the affected sectors${
+                    universe.length > stocks.length ? ` — ${universe.length} candidates available` : ''
+                  }.`}
+            </p>
+          </div>
+          {onReanalyse && universe.length > 0 && (
+            <button
+              onClick={() => setPicking((v) => !v)}
+              className="text-xs font-medium px-3 py-1.5 rounded-lg border border-border text-accent-bright hover:border-accent-dim transition"
+            >
+              {picking ? 'Close' : 'Choose companies'}
+            </button>
+          )}
+        </div>
+
+        {picking && onReanalyse && (
+          <div className="border border-border rounded-lg p-4 mb-4 bg-surface-2">
+            <p className="text-xs text-ink-muted mb-3">
+              Pick the companies this event should be scored against. The transmission mechanism is
+              the same; the numbers underneath it are each company&apos;s own.
+            </p>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {universe.map((c) => {
+                const on = picked.includes(c.symbol)
+                return (
+                  <button
+                    key={c.symbol}
+                    onClick={() => togglePick(c.symbol)}
+                    title={`${c.name} · ${c.sector}`}
+                    className={`text-[11px] font-mono px-2.5 py-1 rounded-full border transition ${
+                      on
+                        ? 'bg-accent-dim text-accent-bright border-accent-dim'
+                        : 'bg-surface text-ink-muted border-border hover:border-accent-dim'
+                    }`}
+                  >
+                    {on ? '✓ ' : ''}
+                    {c.symbol}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={() => onReanalyse(picked)}
+                disabled={picked.length === 0 || reanalysing}
+                className="bg-accent hover:bg-accent-bright text-on-accent text-xs font-semibold px-4 py-2 rounded-lg transition disabled:opacity-50"
+              >
+                {reanalysing ? 'Scoring…' : `Re-run on ${picked.length} compan${picked.length === 1 ? 'y' : 'ies'}`}
+              </button>
+              <button
+                onClick={() => setPicked(universe.map((c) => c.symbol))}
+                className="text-xs text-ink-muted hover:text-accent transition"
+              >
+                Select all
+              </button>
+              <button
+                onClick={() => setPicked([])}
+                className="text-xs text-ink-muted hover:text-accent transition"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        )}
 
         {unrated > 0 && (
           <p className="text-xs text-hold border border-hold-dim bg-hold-dim rounded-lg px-3 py-2 mb-4">
@@ -178,6 +273,12 @@ export default function AnalysisResult({ payload }: { payload: AnalysisPayload }
             sourced right now, so {unrated === stocks.length ? 'these names are' : 'they are'} shown
             unrated: the event score alone is identical for every company in the sector and cannot
             tell them apart.
+          </p>
+        )}
+
+        {(payload.unknownSymbols?.length ?? 0) > 0 && (
+          <p className="text-xs text-avoid border border-avoid-dim bg-avoid-dim rounded-lg px-3 py-2 mb-4">
+            Not in the stock universe, so not scored: {payload.unknownSymbols!.join(', ')}.
           </p>
         )}
 
@@ -199,6 +300,25 @@ export default function AnalysisResult({ payload }: { payload: AnalysisPayload }
                 <p className="font-mono text-sm font-bold text-ink">{stock.symbol}</p>
                 <p className="text-xs text-ink-faint truncate">
                   {stock.name} · {stock.sector}
+                </p>
+                <p className="text-[11px] text-ink-muted mono-tabular mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                  {typeof stock.price === 'number' && (
+                    <span>
+                      ₹{stock.price.toFixed(2)}
+                      {typeof stock.changePct === 'number' && (
+                        <span className={stock.changePct >= 0 ? 'text-buy' : 'text-avoid'}>
+                          {' '}
+                          {stock.changePct >= 0 ? '+' : ''}
+                          {stock.changePct.toFixed(2)}%
+                        </span>
+                      )}
+                    </span>
+                  )}
+                  {typeof stock.peRatio === 'number' && <span>P/E {stock.peRatio.toFixed(1)}</span>}
+                  {typeof stock.rsi14 === 'number' && <span>RSI {stock.rsi14.toFixed(0)}</span>}
+                  {typeof stock.volatilityPct === 'number' && (
+                    <span>vol {stock.volatilityPct.toFixed(0)}%</span>
+                  )}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">

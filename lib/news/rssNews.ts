@@ -85,6 +85,28 @@ function splitPublisher(title: string, fallbackSource: string): { title: string;
 }
 
 /** Split out from the fetch so the feed shapes can be tested without network. */
+/**
+ * Google News sets `description` to a link whose text is the headline again,
+ * so the stripped description is usually the title verbatim, sometimes with
+ * the publisher appended. Carried through, that produced analysis pages
+ * headed "RBI may hike repo rate by 25 bps in October meet: Economists RBI
+ * may hike repo rate by 25 bps in October meet: Economists Fortune India" —
+ * the same sentence three times over.
+ *
+ * A description is kept only when it says something the title does not.
+ */
+function usefulDescription(description: string | null, title: string): string | null {
+  if (!description) return null
+  const norm = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+  const d = norm(description)
+  const t = norm(title)
+  if (!d || d === t) return null
+  // A description that is the title plus a publisher name adds nothing.
+  if (d.startsWith(t) && d.length - t.length < 40) return null
+  if (t.startsWith(d)) return null
+  return description
+}
+
 export function parseRssFeed(xml: string, fallbackSource: string): RssNewsItem[] {
   const parsed = parser.parse(xml)
   const items: any[] = parsed?.rss?.channel?.item ?? []
@@ -105,7 +127,7 @@ export function parseRssFeed(xml: string, fallbackSource: string): RssNewsItem[]
 
       return {
         title,
-        description: clean(item?.description) || null,
+        description: usefulDescription(clean(item?.description), title),
         url: link,
         publishedAt: toIso(item?.pubDate),
         source: source || fallbackSource,
