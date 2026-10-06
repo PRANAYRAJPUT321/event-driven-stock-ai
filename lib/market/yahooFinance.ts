@@ -27,6 +27,7 @@ import {
   type BatchQuote,
 } from './yahooClient'
 import { fetchStooqDaily, fetchStooqQuotes, type StooqQuote } from './stooq'
+import { fetchFxQuotes, FRANKFURTER_SYMBOLS } from './frankfurter'
 
 export type QuoteCategory = 'domestic' | 'international' | 'commodity' | 'currency'
 
@@ -51,7 +52,12 @@ export interface MarketQuote {
   spark?: number[]
 }
 
-export type QuoteSource = 'yahoo-spark' | 'yahoo-quote' | 'yahoo-chart' | 'stooq'
+export type QuoteSource =
+  | 'yahoo-spark'
+  | 'yahoo-quote'
+  | 'yahoo-chart'
+  | 'stooq'
+  | 'frankfurter'
 
 export interface TrackedSymbol {
   symbol: string
@@ -417,6 +423,23 @@ async function resolveQuotes(
   let failureReason: string | undefined
 
   let pending = tracked
+
+  // 0. Currencies, from the ECB's published rates. Every Yahoo FX symbol is
+  //    currently refused and the tab was empty; this is the one source the
+  //    deployment's own diagnostics prove it can reach for these pairs.
+  const fxWanted = pending.filter((t) => FRANKFURTER_SYMBOLS.has(t.symbol))
+  if (fxWanted.length > 0) {
+    try {
+      const fx = await fetchFxQuotes(fxWanted)
+      if (fx.length > 0) {
+        quotes.push(...fx)
+        const got = new Set(fx.map((q) => q.symbol))
+        pending = pending.filter((t) => !got.has(t.symbol))
+      }
+    } catch (err: any) {
+      failureReason ??= `fx failed: ${err?.message || 'unknown error'}`
+    }
+  }
 
   // 1. Spark first: one request per forty symbols, no session required. This
   //    is the path that keeps the grid inside Yahoo's tolerance.

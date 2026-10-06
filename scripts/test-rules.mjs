@@ -22,6 +22,7 @@ const MODULES = [
   'lib/scoring/scoreCalculator.ts',
   'lib/market/yahooClient.ts',
   'lib/market/stooq.ts',
+  'lib/market/frankfurter.ts',
 ]
 
 // Emitted inside the project so Node resolves the project's node_modules.
@@ -79,6 +80,7 @@ const { calculateCompositeFromAvailable, recommendationFromComposite } =
 const { mapWithConcurrency, yahooRequest, fetchSparkBatch } =
   require(path.join(out, 'market/yahooClient.js'))
 const { parseStooqCsv, toStooqSymbol } = require(path.join(out, 'market/stooq.js'))
+const { fetchFxQuotes, FRANKFURTER_SYMBOLS } = require(path.join(out, 'market/frankfurter.js'))
 
 let failures = 0
 let checks = 0
@@ -585,6 +587,73 @@ check('a header with no rows yields no rows', parseStooqCsv('Symbol,Date,Close')
   // N/D in the price column must never become a number.
   const rows = parseStooqCsv('Symbol,Date,Time,Open,High,Low,Close,Volume\nx.in,N/D,N/D,N/D,N/D,N/D,N/D,N/D')
   check('a quote with no close is dropped entirely', rows.size, 0)
+}
+
+section('FX from the ECB reference rates')
+
+check('the pairs it covers', FRANKFURTER_SYMBOLS.size, 8)
+checkThat('AED is not claimed — the ECB does not publish it',
+  !FRANKFURTER_SYMBOLS.has('AEDINR=X'))
+checkThat('the dollar index is not claimed — it is not a currency pair',
+  !FRANKFURTER_SYMBOLS.has('DX-Y.NYB'))
+
+{
+  const calls = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    const u = new URL(String(url))
+    calls.push(u.searchParams.get('from'))
+    const quotes = (u.searchParams.get('to') || '').split(',')
+    // Three ECB publication days, rising.
+    const rates = {}
+    ;['2026-10-01', '2026-10-02', '2026-10-03'].forEach((date, i) => {
+      rates[date] = Object.fromEntries(quotes.map((q) => [q, 90 + i]))
+    })
+    return { ok: true, status: 200, json: async () => ({ base: u.searchParams.get('from'), rates }) }
+  }
+
+  const tracked = [
+    { symbol: 'USDINR=X', name: 'USD/INR', category: 'currency' },
+    { symbol: 'EURINR=X', name: 'EUR/INR', category: 'currency' },
+    { symbol: 'GBPINR=X', name: 'GBP/INR', category: 'currency' },
+    { symbol: 'AEDINR=X', name: 'AED/INR', category: 'currency' },
+  ]
+  const fx = await fetchFxQuotes(tracked)
+  globalThis.fetch = realFetch
+
+  check('only the covered pairs come back', fx.length, 3)
+  checkThat('an uncovered pair is left for another provider',
+    !fx.some((q) => q.symbol === 'AEDINR=X'))
+  check('price is the latest fixing', fx[0].price, 92)
+  check('previous close is the fixing before it', fx[0].previousClose, 91)
+  checkThat('the move is derived from those two',
+    Math.abs(fx[0].changePct - ((92 - 91) / 91) * 100) < 1e-9)
+  check('the tile gets a series to draw', fx[0].spark.length, 3)
+  check('the source is labelled', fx[0].source, 'frankfurter')
+  checkThat('one request per base currency, not per pair',
+    calls.length === new Set(calls).size && calls.length <= 3,
+    `bases requested: ${calls.join(',')}`)
+}
+
+{
+  // A single data point gives a price but no move, and a move is most of what
+  // a currency tile is for.
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async () => ({
+    ok: true, status: 200,
+    json: async () => ({ rates: { '2026-10-03': { INR: 90 } } }),
+  })
+  const fx = await fetchFxQuotes([{ symbol: 'USDINR=X', name: 'USD/INR', category: 'currency' }])
+  globalThis.fetch = realFetch
+  check('a single fixing is not shown as a flat day', fx.length, 0)
+}
+
+{
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async () => ({ ok: false, status: 503, json: async () => ({}) })
+  const fx = await fetchFxQuotes([{ symbol: 'USDINR=X', name: 'USD/INR', category: 'currency' }])
+  globalThis.fetch = realFetch
+  check('an outage yields nothing rather than throwing', fx.length, 0)
 }
 
 console.log(

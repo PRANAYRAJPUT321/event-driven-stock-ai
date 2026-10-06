@@ -33,6 +33,7 @@ const SOURCE_LABELS: Record<string, string> = {
   'yahoo-quote': 'Yahoo (quote)',
   'yahoo-chart': 'Yahoo (chart)',
   stooq: 'Stooq',
+  frankfurter: 'ECB rates',
 }
 
 interface EquityQuote {
