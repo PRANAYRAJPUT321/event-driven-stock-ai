@@ -149,8 +149,8 @@ CREATE POLICY "Users can only view their own saved analyses" ON saved_analyses
   FOR SELECT USING (auth.uid() = user_id);
 
 -- Create indexes
-CREATE INDEX idx_events_user ON events(user_id);
-CREATE INDEX idx_event_analysis_user ON event_analysis(user_id);
-CREATE INDEX idx_stock_scores_analysis ON stock_scores(event_analysis_id);
-CREATE INDEX idx_watchlists_user ON watchlists(user_id);
-CREATE INDEX idx_saved_analyses_user ON saved_analyses(user_id);
+CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id);
+CREATE INDEX IF NOT EXISTS idx_event_analysis_user ON event_analysis(user_id);
+CREATE INDEX IF NOT EXISTS idx_stock_scores_analysis ON stock_scores(event_analysis_id);
+CREATE INDEX IF NOT EXISTS idx_watchlists_user ON watchlists(user_id);
+CREATE INDEX IF NOT EXISTS idx_saved_analyses_user ON saved_analyses(user_id);

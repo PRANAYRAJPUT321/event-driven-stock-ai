@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "next lint",
     "format": "prettier --write .",
-    "test:rules": "node scripts/test-rules.mjs"
+    "test:rules": "node scripts/test-rules.mjs",
+    "test:schema": "bash scripts/test-schema.sh",
+    "build:schema": "node scripts/build-schema.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",

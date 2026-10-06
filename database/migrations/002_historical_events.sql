@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS historical_event_reactions (
   created_at TIMESTAMP DEFAULT now()
 );
 
-CREATE INDEX idx_historical_event_type ON historical_event_reactions(event_type, economic_variable, direction);
+CREATE INDEX IF NOT EXISTS idx_historical_event_type ON historical_event_reactions(event_type, economic_variable, direction);
 
 ALTER TABLE historical_event_reactions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Historical reactions are readable by any authenticated user" ON historical_event_reactions

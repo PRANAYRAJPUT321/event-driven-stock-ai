@@ -166,11 +166,11 @@ CREATE POLICY "Users can only view their own saved analyses" ON saved_analyses
   FOR SELECT USING (auth.uid() = user_id);
 
 -- Create indexes
-CREATE INDEX idx_events_user ON events(user_id);
-CREATE INDEX idx_event_analysis_user ON event_analysis(user_id);
-CREATE INDEX idx_stock_scores_analysis ON stock_scores(event_analysis_id);
-CREATE INDEX idx_watchlists_user ON watchlists(user_id);
-CREATE INDEX idx_saved_analyses_user ON saved_analyses(user_id);
+CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id);
+CREATE INDEX IF NOT EXISTS idx_event_analysis_user ON event_analysis(user_id);
+CREATE INDEX IF NOT EXISTS idx_stock_scores_analysis ON stock_scores(event_analysis_id);
+CREATE INDEX IF NOT EXISTS idx_watchlists_user ON watchlists(user_id);
+CREATE INDEX IF NOT EXISTS idx_saved_analyses_user ON saved_analyses(user_id);
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- 002_historical_events.sql
@@ -199,7 +199,7 @@ CREATE TABLE IF NOT EXISTS historical_event_reactions (
   created_at TIMESTAMP DEFAULT now()
 );
 
-CREATE INDEX idx_historical_event_type ON historical_event_reactions(event_type, economic_variable, direction);
+CREATE INDEX IF NOT EXISTS idx_historical_event_type ON historical_event_reactions(event_type, economic_variable, direction);
 
 ALTER TABLE historical_event_reactions ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Historical reactions are readable by any authenticated user" ON historical_event_reactions;
