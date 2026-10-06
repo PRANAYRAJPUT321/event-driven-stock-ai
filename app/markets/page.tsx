@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient, getSessionUser } from '@/lib/supabase/client'
 import AppShell from '@/components/layout/AppShell'
+import Sparkline from '@/components/charts/Sparkline'
 import type { User } from '@supabase/supabase-js'
 import type { MarketQuote } from '@/lib/market/yahooFinance'
 
@@ -26,12 +27,22 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'crypto', label: 'Crypto' },
 ]
 
+/** Human names for the provider ids the API reports. */
+const SOURCE_LABELS: Record<string, string> = {
+  'yahoo-spark': 'Yahoo (batch)',
+  'yahoo-quote': 'Yahoo (quote)',
+  'yahoo-chart': 'Yahoo (chart)',
+  stooq: 'Stooq',
+}
+
 interface EquityQuote {
   symbol: string
   name: string
   sector: string
   price: number
   changePct: number
+  spark?: number[]
+  source?: string
 }
 
 // Heat intensity scales with |change| up to this cap, so a routine ±0.3%
@@ -79,6 +90,8 @@ interface Tile {
   footnote?: string
   /** Set for tiles that link somewhere — equities link to their profile. */
   href?: string
+  /** Recent closes, for the tile's own price line. */
+  spark?: number[]
 }
 
 export default function Markets() {
@@ -96,6 +109,10 @@ export default function Markets() {
   // payload instead. Shown rather than hidden: slightly old prices labelled as
   // old are useful; the same prices passed off as live are not.
   const [staleAgeSeconds, setStaleAgeSeconds] = useState<number | null>(null)
+  // Which upstream actually served the prices on screen. Worth showing: the
+  // app falls back across several, and "which feed answered" has been the
+  // single most useful thing to know when the grid looked wrong.
+  const [sources, setSources] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>('equities')
 
@@ -143,6 +160,15 @@ export default function Markets() {
       setStaleAgeSeconds(
         marketRes.value.body.stale ? marketRes.value.body.staleAgeSeconds ?? null : null
       )
+      setSources(
+        Array.from(
+          new Set(
+            [...(marketRes.value.body.quotes || [])]
+              .map((q: MarketQuote) => q.source)
+              .filter(Boolean) as string[]
+          )
+        )
+      )
     } else {
       const reason =
         marketRes.status === 'fulfilled' ? marketRes.value.body?.error : (marketRes.reason as Error)?.message
@@ -184,6 +210,7 @@ export default function Markets() {
       price: q.price,
       changePct: q.changePct,
       footnote: q.currency,
+      spark: q.spark,
     }))
 
   const equityTiles: Tile[] = equities
@@ -196,6 +223,7 @@ export default function Markets() {
       changePct: e.changePct,
       footnote: e.symbol,
       href: `/stocks/${e.symbol}`,
+      spark: e.spark,
     }))
 
   const byTab: Record<Tab, Tile[]> = {
@@ -254,6 +282,11 @@ export default function Markets() {
                       : `${Math.round(staleAgeSeconds / 60)}m`
                   } old`
                 : `Updated ${new Date(fetchedAt).toLocaleTimeString('en-IN', { hour12: false })}`}
+            </span>
+          )}
+          {sources.length > 0 && (
+            <span className="text-[10px] font-mono text-ink-faint">
+              via {sources.map((s) => SOURCE_LABELS[s] ?? s).join(' + ')}
             </span>
           )}
           {!loading && active.length > 0 && (
@@ -348,22 +381,32 @@ export default function Markets() {
               <p className="font-bold text-ink text-sm mb-2 truncate" title={tile.name}>
                 {tile.name}
               </p>
-              <p className="mono-tabular text-lg font-bold text-ink">
-                {tile.price.toLocaleString('en-IN', {
-                  minimumFractionDigits: tile.price < 10 ? 4 : 2,
-                  maximumFractionDigits: tile.price < 10 ? 4 : 2,
-                })}
-              </p>
-              <p
-                className={`mono-tabular text-sm font-semibold ${
-                  tile.changePct >= 0 ? 'text-buy' : 'text-avoid'
-                }`}
-              >
-                {tile.changePct >= 0 ? '+' : ''}
-                {tile.changePct.toFixed(2)}%
-              </p>
+              <div className="flex items-end justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="mono-tabular text-lg font-bold text-ink leading-tight">
+                    {tile.price.toLocaleString('en-IN', {
+                      minimumFractionDigits: tile.price < 10 ? 4 : 2,
+                      maximumFractionDigits: tile.price < 10 ? 4 : 2,
+                    })}
+                  </p>
+                  <p
+                    className={`mono-tabular text-sm font-semibold ${
+                      tile.changePct >= 0 ? 'text-buy' : 'text-avoid'
+                    }`}
+                  >
+                    {tile.changePct >= 0 ? '▲' : '▼'} {Math.abs(tile.changePct).toFixed(2)}%
+                  </p>
+                </div>
+                {tile.spark && tile.spark.length > 1 && (
+                  <Sparkline
+                    values={tile.spark}
+                    positive={tile.changePct >= 0}
+                    className="flex-shrink-0 opacity-90"
+                  />
+                )}
+              </div>
               {tile.footnote && (
-                <p className="text-[10px] text-ink-faint mt-1 font-mono">{tile.footnote}</p>
+                <p className="text-[10px] text-ink-faint mt-1.5 font-mono">{tile.footnote}</p>
               )}
             </Tag>
             )

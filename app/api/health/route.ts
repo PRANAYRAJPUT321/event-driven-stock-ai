@@ -114,6 +114,12 @@ export async function GET(request: Request) {
       'https://query1.finance.yahoo.com/v7/finance/spark?symbols=RELIANCE.NS,TCS.NS&range=5d&interval=1d',
       { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }
     )
+    // The second price provider. Independent of Yahoo in company and
+    // infrastructure, so it is the one that matters when Yahoo refuses.
+    checks.stooq = await probe(
+      'https://stooq.com/q/l/?s=reliance.in+tcs.in&f=sd2t2ohlcv&h&e=csv',
+      { Accept: 'text/csv' }
+    )
     checks.googleNewsRss = await probe(
       'https://news.google.com/rss/search?q=nifty&hl=en-IN&gl=IN&ceid=IN:en',
       { 'User-Agent': 'Mozilla/5.0' }

@@ -26,6 +26,7 @@ import {
   YAHOO_HOSTS,
   type BatchQuote,
 } from './yahooClient'
+import { fetchStooqDaily, fetchStooqQuotes, type StooqQuote } from './stooq'
 
 export type QuoteCategory = 'domestic' | 'international' | 'commodity' | 'currency'
 
@@ -38,9 +39,19 @@ export interface MarketQuote {
   change: number
   changePct: number
   currency: string
-  /** Yahoo's timestamp for the quote, ISO-8601. */
+  /** The upstream timestamp for the quote, ISO-8601. */
   asOf: string | null
+  /** Which provider served this quote. Surfaced so the UI can say so. */
+  source?: QuoteSource
+  /**
+   * Recent closes, oldest first, for the tile sparkline. Present whenever the
+   * provider returned a series; a quote-only provider leaves it undefined
+   * rather than fabricating a shape.
+   */
+  spark?: number[]
 }
+
+export type QuoteSource = 'yahoo-spark' | 'yahoo-quote' | 'yahoo-chart' | 'stooq'
 
 export interface TrackedSymbol {
   symbol: string
@@ -213,7 +224,11 @@ export function previousSessionClose(closes: unknown[], meta: any): number | nul
  * carries the previous close varies by instrument (indices use
  * chartPreviousClose, FX and futures often only set previousClose).
  */
-export function parseChart(body: any, tracked: TrackedSymbol): MarketQuote | null {
+export function parseChart(
+  body: any,
+  tracked: TrackedSymbol,
+  source: QuoteSource = 'yahoo-chart'
+): MarketQuote | null {
   const result = body?.chart?.result?.[0]
   const meta = result?.meta
   if (!meta) return null
@@ -245,6 +260,8 @@ export function parseChart(body: any, tracked: TrackedSymbol): MarketQuote | nul
     changePct,
     currency: typeof meta.currency === 'string' ? meta.currency : '',
     asOf: ts !== null ? new Date(ts * 1000).toISOString() : null,
+    source,
+    spark: closes.map(num).filter((c): c is number => c !== null),
   }
 }
 
@@ -278,6 +295,50 @@ function fromBatch(tracked: TrackedSymbol, row: BatchQuote): MarketQuote | null 
     asOf: row.marketTimeSeconds !== null
       ? new Date(row.marketTimeSeconds * 1000).toISOString()
       : null,
+    source: 'yahoo-quote',
+  }
+}
+
+/** Previous closes keyed by NSE symbol. Valid for the session, not the minute. */
+const stooqPrevClose = new Map<string, { value: number; series: number[]; at: number }>()
+const PREV_CLOSE_TTL_MS = 6 * 60 * 60 * 1000
+
+/**
+ * Builds a quote from Stooq's price plus a previous close taken from its daily
+ * series. The series is cached for hours because it only moves once a day, so
+ * a refresh costs one batched request rather than one per symbol.
+ */
+async function fromStooq(
+  tracked: TrackedSymbol,
+  nseSymbol: string,
+  row: StooqQuote
+): Promise<MarketQuote | null> {
+  let cached = stooqPrevClose.get(nseSymbol)
+  if (!cached || Date.now() - cached.at > PREV_CLOSE_TTL_MS) {
+    const series = await fetchStooqDaily(nseSymbol)
+    if (series.length >= 2) {
+      cached = { value: series[series.length - 2], series, at: Date.now() }
+      stooqPrevClose.set(nseSymbol, cached)
+    }
+  }
+
+  // No previous close means no honest percentage, so this symbol is left to
+  // the next provider rather than shown with a fabricated move.
+  if (!cached) return null
+
+  const change = row.price - cached.value
+  return {
+    symbol: tracked.symbol,
+    name: tracked.name,
+    category: tracked.category,
+    price: row.price,
+    previousClose: cached.value,
+    change,
+    changePct: cached.value !== 0 ? (change / cached.value) * 100 : 0,
+    currency: 'INR',
+    asOf: row.asOf,
+    source: 'stooq',
+    spark: cached.series.slice(-30),
   }
 }
 
@@ -312,7 +373,7 @@ async function resolveQuotes(
       const remaining: TrackedSymbol[] = []
       for (const t of pending) {
         const payload = spark.get(t.symbol)
-        const quote = payload ? parseChart(payload, t) : null
+        const quote = payload ? parseChart(payload, t, 'yahoo-spark') : null
         if (quote) quotes.push(quote)
         else remaining.push(t)
       }
@@ -322,7 +383,38 @@ async function resolveQuotes(
     failureReason ??= `spark batch failed: ${err?.message || 'unknown error'}`
   }
 
-  // 2. The crumbed quote endpoint, for whatever spark did not answer for.
+  // 2. Stooq, for whatever spark did not answer for. A different company on
+  //    different infrastructure, so a bad day at Yahoo is not an outage here.
+  //    Only equities carry the .NS suffix this can map; indices and futures
+  //    are left to the Yahoo paths.
+  if (pending.length > 0) {
+    const mappable = pending.filter((t) => t.symbol.endsWith('.NS'))
+    if (mappable.length > 0) {
+      try {
+        const nseFor = new Map(mappable.map((t) => [t.symbol, t.symbol.replace(/\.NS$/, '')]))
+        const rows = await fetchStooqQuotes(Array.from(nseFor.values()))
+        if (rows.size > 0) {
+          const resolved = await mapWithConcurrency(mappable, DEFAULT_CONCURRENCY, async (t) => {
+            const nse = nseFor.get(t.symbol)!
+            const row = rows.get(nse)
+            return row ? await fromStooq(t, nse, row) : null
+          })
+          const got = new Set<string>()
+          resolved.forEach((outcome, i) => {
+            if (outcome.status === 'fulfilled' && outcome.value) {
+              quotes.push(outcome.value)
+              got.add(mappable[i].symbol)
+            }
+          })
+          if (got.size > 0) pending = pending.filter((t) => !got.has(t.symbol))
+        }
+      } catch (err: any) {
+        failureReason ??= `stooq failed: ${err?.message || 'unknown error'}`
+      }
+    }
+  }
+
+  // 3. The crumbed quote endpoint, for whatever is still missing.
   //    Kept because it carries fields spark does not and still works from
   //    some networks, but it is no longer the only batch path.
   if (pending.length > 0) {
@@ -343,7 +435,7 @@ async function resolveQuotes(
     }
   }
 
-  // 3. Last resort: one request per symbol, throttled.
+  // 4. Last resort: one request per symbol, throttled.
   if (pending.length > 0) {
     const settled = await mapWithConcurrency(pending, DEFAULT_CONCURRENCY, (t) =>
       fetchOne(t, revalidateSeconds)

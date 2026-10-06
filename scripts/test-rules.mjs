@@ -21,6 +21,7 @@ const MODULES = [
   'lib/market/indianEquities.ts',
   'lib/scoring/scoreCalculator.ts',
   'lib/market/yahooClient.ts',
+  'lib/market/stooq.ts',
 ]
 
 // Emitted inside the project so Node resolves the project's node_modules.
@@ -77,6 +78,7 @@ const { calculateCompositeFromAvailable, recommendationFromComposite } =
   require(path.join(out, 'scoring/scoreCalculator.js'))
 const { mapWithConcurrency, yahooRequest, fetchSparkBatch } =
   require(path.join(out, 'market/yahooClient.js'))
+const { parseStooqCsv, toStooqSymbol } = require(path.join(out, 'market/stooq.js'))
 
 let failures = 0
 let checks = 0
@@ -552,6 +554,37 @@ section('spark batch — the crumbless path')
   const found = await fetchSparkBatch(['A.NS', 'B.NS'])
   globalThis.fetch = realFetch
   check('a total spark failure returns null', found, null)
+}
+
+section('Stooq — the second price source')
+
+check('an NSE ticker maps to Stooq\'s listing', toStooqSymbol('RELIANCE'), 'reliance.in')
+check('punctuation is stripped', toStooqSymbol('M&M'), 'mm.in')
+check('case does not matter', toStooqSymbol('tcs'), 'tcs.in')
+
+{
+  const csv = [
+    'Symbol,Date,Time,Open,High,Low,Close,Volume',
+    'reliance.in,2026-10-06,09:45:00,1402.00,1418.50,1398.10,1412.30,2451233',
+    'tcs.in,2026-10-06,09:45:00,3180.00,3205.00,3176.40,3198.75,881240',
+    'nosuch.in,N/D,N/D,N/D,N/D,N/D,N/D,N/D',
+  ].join('\n')
+  const rows = parseStooqCsv(csv)
+  check('only the symbols it carries come back', rows.size, 2)
+  check('close is the price', rows.get('reliance.in').price, 1412.3)
+  check('session range is carried', rows.get('reliance.in').high, 1418.5)
+  check('volume is parsed', rows.get('tcs.in').volume, 881240)
+  checkThat('an unknown symbol is absent, not zero', !rows.has('nosuch.in'))
+  checkThat('the timestamp is ISO', rows.get('tcs.in').asOf.startsWith('2026-10-06'))
+}
+
+check('an empty response yields no rows', parseStooqCsv('').size, 0)
+check('a header with no rows yields no rows', parseStooqCsv('Symbol,Date,Close').size, 0)
+
+{
+  // N/D in the price column must never become a number.
+  const rows = parseStooqCsv('Symbol,Date,Time,Open,High,Low,Close,Volume\nx.in,N/D,N/D,N/D,N/D,N/D,N/D,N/D')
+  check('a quote with no close is dropped entirely', rows.size, 0)
 }
 
 console.log(
