@@ -92,6 +92,10 @@ export default function Markets() {
   const [failed, setFailed] = useState<string[]>([])
   const [errors, setErrors] = useState<string[]>([])
   const [fetchedAt, setFetchedAt] = useState<string | null>(null)
+  // Set when the upstream rate-limited and the server served its last good
+  // payload instead. Shown rather than hidden: slightly old prices labelled as
+  // old are useful; the same prices passed off as live are not.
+  const [staleAgeSeconds, setStaleAgeSeconds] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>('equities')
 
@@ -136,6 +140,9 @@ export default function Markets() {
       setQuotes(marketRes.value.body.quotes || [])
       nextFailed.push(...(marketRes.value.body.failed || []))
       setFetchedAt(marketRes.value.body.fetchedAt || null)
+      setStaleAgeSeconds(
+        marketRes.value.body.stale ? marketRes.value.body.staleAgeSeconds ?? null : null
+      )
     } else {
       const reason =
         marketRes.status === 'fulfilled' ? marketRes.value.body?.error : (marketRes.reason as Error)?.message
@@ -229,9 +236,24 @@ export default function Markets() {
         </div>
         <div className="flex flex-col items-start sm:items-end gap-1.5 flex-shrink-0">
           {fetchedAt && (
-            <span className="flex items-center gap-2 text-[10px] font-mono text-ink-faint">
-              <span className="live-dot" />
-              Updated {new Date(fetchedAt).toLocaleTimeString('en-IN', { hour12: false })}
+            <span
+              className={`flex items-center gap-2 text-[10px] font-mono ${
+                staleAgeSeconds !== null ? 'text-hold' : 'text-ink-faint'
+              }`}
+              title={
+                staleAgeSeconds !== null
+                  ? 'The upstream feed is rate-limiting. These are the last prices it served.'
+                  : undefined
+              }
+            >
+              {staleAgeSeconds === null && <span className="live-dot" />}
+              {staleAgeSeconds !== null
+                ? `Last good prices · ${
+                    staleAgeSeconds < 90
+                      ? `${staleAgeSeconds}s`
+                      : `${Math.round(staleAgeSeconds / 60)}m`
+                  } old`
+                : `Updated ${new Date(fetchedAt).toLocaleTimeString('en-IN', { hour12: false })}`}
             </span>
           )}
           {!loading && active.length > 0 && (

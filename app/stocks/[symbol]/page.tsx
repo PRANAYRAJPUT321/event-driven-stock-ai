@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { createClient, getSessionUser } from '@/lib/supabase/client'
 import AppShell from '@/components/layout/AppShell'
+import { findEquity } from '@/lib/market/indianEquities'
 import type { User } from '@supabase/supabase-js'
 
 interface Quote {
@@ -90,6 +91,8 @@ export default function StockProfile({ params }: { params: { symbol: string } })
   const [watched, setWatched] = useState(false)
   const [watching, setWatching] = useState(false)
   const [watchError, setWatchError] = useState<string | null>(null)
+  const [range, setRange] = useState<'1mo' | '6mo' | '1y' | '5y'>('6mo')
+  const [rangeLoading, setRangeLoading] = useState(false)
   const [searchInput, setSearchInput] = useState('')
 
   const symbol = decodeURIComponent(params.symbol).toUpperCase()
@@ -141,7 +144,10 @@ export default function StockProfile({ params }: { params: { symbol: string } })
       try {
         const [quoteRes, historyRes] = await Promise.all([
           fetch(`/api/stocks/quote?symbol=${encodeURIComponent(symbol)}`),
-          fetch(`/api/stocks/history?symbol=${encodeURIComponent(symbol)}&range=6mo&interval=1d`),
+          fetch(
+            `/api/stocks/history?symbol=${encodeURIComponent(symbol)}` +
+              `&range=${range}&interval=${range === '5y' ? '1wk' : '1d'}`
+          ),
         ])
         const quoteData = await quoteRes.json()
         const historyData = await historyRes.json()
@@ -160,6 +166,36 @@ export default function StockProfile({ params }: { params: { symbol: string } })
     }
     load()
   }, [symbol])
+
+  // Range changes refetch only the series. Reloading the quote as well would
+  // throw away the fundamentals tier for no reason and cost an extra request
+  // against an endpoint we are deliberately easy on.
+  const firstRangeRender = useRef(true)
+  useEffect(() => {
+    if (firstRangeRender.current) {
+      firstRangeRender.current = false
+      return
+    }
+    let active = true
+    setRangeLoading(true)
+    fetch(
+      `/api/stocks/history?symbol=${encodeURIComponent(symbol)}` +
+        `&range=${range}&interval=${range === '5y' ? '1wk' : '1d'}`
+    )
+      .then((r) => r.json())
+      .then((data) => {
+        if (!active || !data?.history) return
+        setHistory(data.history)
+        if (data.stats) setStats(data.stats)
+      })
+      .catch(() => {
+        // Keep the series already on screen rather than blanking the chart.
+      })
+      .finally(() => active && setRangeLoading(false))
+    return () => {
+      active = false
+    }
+  }, [range, symbol])
 
   async function handleWatch() {
     if (!user || !stockId || watched) return
@@ -183,6 +219,17 @@ export default function StockProfile({ params }: { params: { symbol: string } })
     router.push('/auth/login')
   }
 
+  const universeEntry = findEquity(symbol)
+  // Where the current price sits between the 52-week low and high, 0-100.
+  const rangePosition =
+    quote?.price != null && quote?.week52Low != null && quote?.week52High != null &&
+    quote.week52High > quote.week52Low
+      ? Math.min(
+          100,
+          Math.max(0, ((quote.price - quote.week52Low) / (quote.week52High - quote.week52Low)) * 100)
+        )
+      : null
+
   const upside = quote?.price && quote?.targetMean ? ((quote.targetMean - quote.price) / quote.price) * 100 : null
 
   return (
@@ -190,8 +237,15 @@ export default function StockProfile({ params }: { params: { symbol: string } })
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 fade-in">
         <div>
           <p className="text-xs font-mono uppercase tracking-widest text-accent-bright mb-2">Live stock profile</p>
-          <h1 className="text-2xl sm:text-3xl font-bold text-ink mb-1">{symbol}</h1>
-          <p className="text-ink-muted text-sm">Real-time price, fundamentals, and analyst view via Yahoo Finance</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-ink mb-1">
+            {quote?.name || symbol}
+          </h1>
+          <p className="text-ink-muted text-sm">
+            <span className="font-mono text-accent-bright">{symbol}</span>
+            {universeEntry?.sector ? ` · ${universeEntry.sector}` : ''}
+            {quote?.currency ? ` · ${quote.currency}` : ''}
+            {' · live from Yahoo Finance'}
+          </p>
         </div>
         <form onSubmit={handleSearch} className="flex gap-2">
           <input
@@ -280,7 +334,27 @@ export default function StockProfile({ params }: { params: { symbol: string } })
           {/* Price chart */}
           {history.length > 0 && (
             <div className="panel p-7 mb-6 fade-in">
-              <h2 className="text-sm font-bold text-ink mb-4">6-Month Price History</h2>
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <h2 className="text-sm font-bold text-ink">
+                  Price History
+                  {rangeLoading && <span className="text-ink-faint font-normal"> · loading…</span>}
+                </h2>
+                <div className="flex gap-1">
+                  {(['1mo', '6mo', '1y', '5y'] as const).map((r) => (
+                    <button
+                      key={r}
+                      onClick={() => setRange(r)}
+                      className={`text-[11px] font-mono px-2.5 py-1 rounded-md border transition ${
+                        range === r
+                          ? 'bg-accent-dim text-accent-bright border-accent-dim'
+                          : 'bg-surface text-ink-muted border-border hover:border-accent-dim'
+                      }`}
+                    >
+                      {r === '1mo' ? '1M' : r === '6mo' ? '6M' : r === '1y' ? '1Y' : '5Y'}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <ResponsiveContainer width="100%" height={280}>
                 <AreaChart data={history} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                   <defs>
@@ -316,6 +390,51 @@ export default function StockProfile({ params }: { params: { symbol: string } })
                   <Area type="monotone" dataKey="close" stroke="var(--accent-bright)" strokeWidth={2} fill="url(#priceFill)" />
                 </AreaChart>
               </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* Company overview — what this company is and where the price sits
+              in its own year, before any of the ratio detail below. */}
+          {quote && (
+            <div className="panel p-7 mb-6 fade-in">
+              <h2 className="text-sm font-bold text-ink mb-4">Overview</h2>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
+                <div>
+                  <p className="text-[11px] text-ink-faint uppercase tracking-wide mb-1">Sector</p>
+                  <p className="text-sm text-ink">{universeEntry?.sector ?? '—'}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-ink-faint uppercase tracking-wide mb-1">Market cap</p>
+                  <p className="text-sm text-ink mono-tabular">{formatMarketCap(quote.marketCap)}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-ink-faint uppercase tracking-wide mb-1">In NIFTY 50</p>
+                  <p className="text-sm text-ink">{universeEntry ? 'Yes' : 'Not in this universe'}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-ink-faint uppercase tracking-wide mb-1">Listing</p>
+                  <p className="text-sm text-ink mono-tabular">NSE · {symbol}</p>
+                </div>
+              </div>
+
+              {rangePosition !== null && (
+                <div>
+                  <div className="flex justify-between text-[11px] text-ink-faint mono-tabular mb-1.5">
+                    <span>52-week low ₹{quote.week52Low!.toFixed(2)}</span>
+                    <span>52-week high ₹{quote.week52High!.toFixed(2)}</span>
+                  </div>
+                  <div className="relative h-2 rounded-full bg-surface-2 border border-border">
+                    <div
+                      className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2.5 h-2.5 rounded-full bg-accent-bright"
+                      style={{ left: `${rangePosition}%` }}
+                      title={`₹${quote.price?.toFixed(2)}`}
+                    />
+                  </div>
+                  <p className="text-[11px] text-ink-muted mt-1.5">
+                    Trading {rangePosition.toFixed(0)}% of the way up its 52-week range.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
