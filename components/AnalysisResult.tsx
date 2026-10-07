@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
 import Link from 'next/link'
+import CompanyPicker from '@/components/CompanyPicker'
 import ScoreGauge from '@/components/charts/ScoreGauge'
 import TransmissionFlow from '@/components/charts/TransmissionFlow'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
@@ -86,12 +86,6 @@ export default function AnalysisResult({
   const unrated = stocks.filter((s) => s.recommendation === 'UNRATED').length
   const unmatched = payload.unmatchedSectors ?? []
   const universe = payload.sectorUniverse ?? []
-  const [picked, setPicked] = useState<string[]>(stocks.map((s) => s.symbol))
-  const [picking, setPicking] = useState(false)
-  const togglePick = (symbol: string) =>
-    setPicked((prev) =>
-      prev.includes(symbol) ? prev.filter((s) => s !== symbol) : [...prev, symbol]
-    )
 
   return (
     <div className="fade-in">
@@ -207,65 +201,15 @@ export default function AnalysisResult({
                   }.`}
             </p>
           </div>
-          {onReanalyse && universe.length > 0 && (
-            <button
-              onClick={() => setPicking((v) => !v)}
-              className="text-xs font-medium px-3 py-1.5 rounded-lg border border-border text-accent-bright hover:border-accent-dim transition"
-            >
-              {picking ? 'Close' : 'Choose companies'}
-            </button>
+          {onReanalyse && (
+            <CompanyPicker
+              universe={universe}
+              initial={stocks.map((s) => s.symbol)}
+              onRun={onReanalyse}
+              running={reanalysing}
+            />
           )}
         </div>
-
-        {picking && onReanalyse && (
-          <div className="border border-border rounded-lg p-4 mb-4 bg-surface-2">
-            <p className="text-xs text-ink-muted mb-3">
-              Pick the companies this event should be scored against. The transmission mechanism is
-              the same; the numbers underneath it are each company&apos;s own.
-            </p>
-            <div className="flex flex-wrap gap-2 mb-4">
-              {universe.map((c) => {
-                const on = picked.includes(c.symbol)
-                return (
-                  <button
-                    key={c.symbol}
-                    onClick={() => togglePick(c.symbol)}
-                    title={`${c.name} · ${c.sector}`}
-                    className={`text-[11px] font-mono px-2.5 py-1 rounded-full border transition ${
-                      on
-                        ? 'bg-accent-dim text-accent-bright border-accent-dim'
-                        : 'bg-surface text-ink-muted border-border hover:border-accent-dim'
-                    }`}
-                  >
-                    {on ? '✓ ' : ''}
-                    {c.symbol}
-                  </button>
-                )
-              })}
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                onClick={() => onReanalyse(picked)}
-                disabled={picked.length === 0 || reanalysing}
-                className="bg-accent hover:bg-accent-bright text-on-accent text-xs font-semibold px-4 py-2 rounded-lg transition disabled:opacity-50"
-              >
-                {reanalysing ? 'Scoring…' : `Re-run on ${picked.length} compan${picked.length === 1 ? 'y' : 'ies'}`}
-              </button>
-              <button
-                onClick={() => setPicked(universe.map((c) => c.symbol))}
-                className="text-xs text-ink-muted hover:text-accent transition"
-              >
-                Select all
-              </button>
-              <button
-                onClick={() => setPicked([])}
-                className="text-xs text-ink-muted hover:text-accent transition"
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-        )}
 
         {unrated > 0 && (
           <p className="text-xs text-hold border border-hold-dim bg-hold-dim rounded-lg px-3 py-2 mb-4">

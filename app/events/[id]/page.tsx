@@ -12,6 +12,8 @@ import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import ScoreChip from '@/components/ui/ScoreChip'
 import NewsImpactPanel from '@/components/NewsImpactPanel'
 import ImpactBreakdown from '@/components/ImpactBreakdown'
+import CompanyPicker from '@/components/CompanyPicker'
+import { NIFTY_50 } from '@/lib/market/indianEquities'
 import type { User } from '@supabase/supabase-js'
 import type { MarketQuote } from '@/lib/market/yahooFinance'
 
@@ -87,7 +89,33 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   const [user, setUser] = useState<User | null>(null)
   const router = useRouter()
   const [backendDown, setBackendDown] = useState(false)
+  const [rescoring, setRescoring] = useState(false)
+  const [rescoreError, setRescoreError] = useState<string | null>(null)
   const supabase = createClient()
+
+  /** Scores the same event against the reader's chosen companies, as a new saved analysis. */
+  async function handleRescore(symbols: string[]) {
+    if (!analysis) return
+    setRescoring(true)
+    setRescoreError(null)
+    try {
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event: analysis.event_title, symbols }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Re-scoring failed')
+      if (data.analysisId) {
+        router.push(`/events/${data.analysisId}`)
+        return
+      }
+      throw new Error(data.persistError || 'The new analysis could not be saved')
+    } catch (err: any) {
+      setRescoreError(err?.message || 'Re-scoring failed')
+      setRescoring(false)
+    }
+  }
 
   useEffect(() => {
     const fetchAnalysis = async () => {
@@ -497,7 +525,22 @@ export default function EventDetails({ params }: { params: { id: string } }) {
 
       {/* Top Affected Stocks */}
       <div className="panel p-7 mb-6">
-        <h2 className="text-lg font-bold text-ink mb-6">Top Affected Stocks</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+          <h2 className="text-lg font-bold text-ink">Top Affected Stocks</h2>
+          {/* Re-running saves a new analysis scored against the chosen names,
+              so the original stays in history unchanged. */}
+          <CompanyPicker
+            universe={NIFTY_50.filter((s) => analysis.affected_sectors?.includes(s.sector))}
+            initial={stocks.map((s) => s.stock_symbol)}
+            onRun={handleRescore}
+            running={rescoring}
+          />
+        </div>
+        {rescoreError && (
+          <p className="text-xs text-avoid border border-avoid-dim bg-avoid-dim rounded-lg px-3 py-2 mb-4">
+            {rescoreError}
+          </p>
+        )}
 
         {stocks.length > 0 ? (
           <div className="overflow-x-auto -mx-2">
