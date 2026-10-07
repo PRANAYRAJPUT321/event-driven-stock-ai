@@ -126,8 +126,8 @@ export default function Portfolio() {
         <p className="text-xs font-mono uppercase tracking-widest text-accent-bright mb-2">Paper trading</p>
         <h1 className="text-2xl sm:text-3xl font-bold text-ink mb-1">Simulated Portfolio</h1>
         <p className="text-ink-muted text-sm">
-          Hypothetical positions from &quot;Simulate&quot; on an event&apos;s recommended stocks, tracked against
-          this project&apos;s own deterministic price model — not real market performance.
+          Hypothetical positions from &quot;Simulate&quot; on an event&apos;s recommended stocks, marked to live
+          market prices. Paper trading only — no real money changes hands.
         </p>
       </div>
 
