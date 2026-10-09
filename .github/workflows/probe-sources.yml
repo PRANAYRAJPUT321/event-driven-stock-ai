@@ -1,4 +1,5 @@
-# Temporary: probes market-data sources from a cloud IP (see scripts/probe-sources.mjs).
+# Temporary: probes market-data sources from a cloud IP (see scripts/probe-sources.mjs)
+# and commits the reference data and fixtures it records back to this branch.
 name: probe-data-sources
 on:
   workflow_dispatch:
@@ -6,14 +7,22 @@ on:
     branches: [claude/event-driven-stock-ai-tj6oic]
     paths: [scripts/probe-sources.mjs, .github/workflows/probe-sources.yml]
 permissions:
-  contents: read
+  contents: write
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - run: node scripts/probe-sources.mjs
+      - name: Commit recordings
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/market/data scripts/fixtures/market
+          if git diff --cached --quiet; then echo "nothing to commit"; exit 0; fi
+          git commit -m "Record NSE reference data and market-data fixtures from a cloud runner"
+          git push origin HEAD:${{ github.ref_name }}
