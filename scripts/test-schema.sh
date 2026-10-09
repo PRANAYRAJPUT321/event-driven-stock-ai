@@ -48,6 +48,11 @@ CREATE OR REPLACE FUNCTION auth.role() RETURNS TEXT LANGUAGE sql STABLE AS $$
   SELECT coalesce(nullif(current_setting('request.jwt.claim.role', true), ''), 'anon') $$;
 CREATE OR REPLACE FUNCTION auth.email() RETURNS TEXT LANGUAGE sql STABLE AS $$
   SELECT nullif(current_setting('request.jwt.claim.email', true), '') $$;
+-- Supabase's API roles, which grants in the schema name.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='anon') THEN CREATE ROLE anon NOLOGIN; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF;
+END $$;
 SQL
 
 cp "$SCHEMA" "$ROOT/schema.sql"
@@ -73,6 +78,8 @@ END $$;
 GRANT USAGE ON SCHEMA public, auth TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
 GRANT SELECT ON auth.users TO app_user;
+-- Signed-in API requests run as `authenticated`; app_user stands in for one.
+GRANT authenticated TO app_user;
 INSERT INTO auth.users (id, email) VALUES
   ('11111111-1111-1111-1111-111111111111','a@example.com'),
   ('22222222-2222-2222-2222-222222222222','b@example.com') ON CONFLICT (id) DO NOTHING;
@@ -114,7 +121,7 @@ DO $$
 DECLARE n int;
 BEGIN
   SELECT count(*) INTO n FROM stocks;
-  IF n <> 52 THEN RAISE EXCEPTION 'stock universe not seeded: % rows', n; END IF;
+  IF n <> 50 THEN RAISE EXCEPTION 'stock universe not seeded: % rows', n; END IF;
 
   SELECT count(*) INTO n FROM event_analysis ea JOIN events e ON e.id = ea.event_id
     WHERE ea.user_id = auth.uid();
@@ -142,11 +149,47 @@ BEGIN
   SELECT count(*) INTO n FROM watchlists;          IF n <> 0 THEN RAISE EXCEPTION 'RLS leak: watchlists'; END IF;
   SELECT count(*) INTO n FROM portfolio_positions; IF n <> 0 THEN RAISE EXCEPTION 'RLS leak: portfolio_positions'; END IF;
   SELECT count(*) INTO n FROM stock_scores;        IF n <> 0 THEN RAISE EXCEPTION 'RLS leak: stock_scores'; END IF;
-  SELECT count(*) INTO n FROM stocks;              IF n <> 52 THEN RAISE EXCEPTION 'reference data hidden: % rows', n; END IF;
+  SELECT count(*) INTO n FROM stocks;              IF n < 50 THEN RAISE EXCEPTION 'reference data hidden: % rows', n; END IF;
+END $$;
+
+-- ensure_stock: any NSE company can be watchlisted, through one narrow door.
+DO $$
+DECLARE a uuid; b uuid; n int; failed boolean;
+BEGIN
+  a := ensure_stock('WIPRO', 'Wipro Limited', 'IT');
+  IF a IS NULL THEN RAISE EXCEPTION 'ensure_stock returned no id'; END IF;
+  b := ensure_stock('wipro', 'Something Else', NULL);
+  IF a <> b THEN RAISE EXCEPTION 'ensure_stock created a duplicate'; END IF;
+  SELECT count(*) INTO n FROM stocks WHERE symbol = 'WIPRO' AND name = 'Wipro Limited';
+  IF n <> 1 THEN RAISE EXCEPTION 'ensure_stock overwrote an existing row'; END IF;
+  -- An existing NIFTY row comes back as-is.
+  IF ensure_stock('HDFCBANK', 'x', 'y') <> (SELECT id FROM stocks WHERE symbol = 'HDFCBANK') THEN
+    RAISE EXCEPTION 'ensure_stock did not return the seeded row';
+  END IF;
+  INSERT INTO watchlists (user_id, stock_id) VALUES (auth.uid(), a);
+  failed := false;
+  BEGIN PERFORM ensure_stock('NOT A SYMBOL!', 'x', NULL); EXCEPTION WHEN others THEN failed := true; END;
+  IF NOT failed THEN RAISE EXCEPTION 'ensure_stock accepted a malformed symbol'; END IF;
+END $$;
+-- Users still cannot write the reference table directly.
+DO $$
+DECLARE failed boolean := false;
+BEGIN
+  BEGIN UPDATE stocks SET name = 'hijacked' WHERE symbol = 'WIPRO'; EXCEPTION WHEN others THEN failed := true; END;
+  IF EXISTS (SELECT 1 FROM stocks WHERE name = 'hijacked') THEN RAISE EXCEPTION 'stocks is writable by users'; END IF;
+END $$;
+-- Signed out, the function refuses.
+RESET request.jwt.claim.sub;
+DO $$
+DECLARE failed boolean := false;
+BEGIN
+  BEGIN PERFORM ensure_stock('ITC', 'ITC', NULL); EXCEPTION WHEN others THEN failed := true; END;
+  IF NOT failed THEN RAISE EXCEPTION 'ensure_stock ran without a signed-in user'; END IF;
 END $$;
 SQL
 chown postgres:postgres "$ROOT/app.sql"
 su postgres -c "$PSQL -f $ROOT/app.sql"
 echo "  ✓ analysis, history, watchlist, portfolio and scores all write and read back"
 echo "  ✓ row-level security isolates users and keeps the stock universe readable"
+echo "  ✓ ensure_stock adds any NSE symbol once, refuses malformed or signed-out calls"
 echo "✓ database/schema.sql verified end to end"

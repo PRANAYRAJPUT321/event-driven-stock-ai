@@ -403,13 +403,13 @@ check('a well-evidenced high score still reads BUY',
 section('sector-to-company mapping')
 
 check('an empty sector list maps to no companies', equitiesForSectors([], 6), [])
-check('a sector with no constituent maps to no companies', equitiesForSectors(['Aviation'], 6), [])
+check('a sector with no constituent maps to no companies', equitiesForSectors(['Shipping'], 6), [])
 checkThat('a real sector still maps to its constituents',
   equitiesForSectors(['Banking'], 6).every((e) => e.sector === 'Banking'))
 checkThat('banks are not substituted for an energy event',
   equitiesForSectors(['Energy'], 6).every((e) => e.sector === 'Energy'))
 check('sectors with no constituent are reported',
-  sectorsWithoutConstituents(['Banking', 'Aviation', 'Realty']), ['Aviation', 'Realty'])
+  sectorsWithoutConstituents(['Banking', 'Aviation', 'Realty']), ['Realty'])
 
 section('counter-argument wording when nothing was scored')
 

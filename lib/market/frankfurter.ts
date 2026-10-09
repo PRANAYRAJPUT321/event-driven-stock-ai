@@ -21,7 +21,7 @@
  * all, so both are left to the other providers.
  */
 
-import type { MarketQuote, TrackedSymbol } from './yahooFinance'
+import type { MarketQuote, TrackedSymbol } from './types'
 
 const HOST = 'https://api.frankfurter.app'
 const TIMEOUT_MS = 7000

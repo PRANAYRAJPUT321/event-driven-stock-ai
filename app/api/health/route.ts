@@ -40,9 +40,14 @@ interface Probe {
   detail: string
 }
 
-async function probe(url: string, headers: Record<string, string>): Promise<Probe> {
+async function probe(
+  url: string,
+  headers: Record<string, string>,
+  init: { method?: string; body?: string } = {}
+): Promise<Probe> {
   try {
     const response = await fetch(url, {
+      ...init,
       headers,
       signal: AbortSignal.timeout(TIMEOUT_MS),
       cache: 'no-store',
@@ -99,26 +104,34 @@ export async function GET(request: Request) {
     })
   }
 
-  // The keyless upstreams the rest of the app depends on. Checking them here
-  // means one URL answers "is anything reachable from this deployment".
+  // The keyless upstreams the rest of the app depends on, in the order the
+  // app tries them. One URL then answers "is anything reachable from this
+  // deployment" — the question that took longest to answer when Yahoo began
+  // refusing Vercel's servers.
   if (!supabaseOnly) {
+    const browserUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36'
+    // Quotes, fundamentals and indices for the whole app, one request each.
+    checks.tradingViewScreener = await probe(
+      'https://scanner.tradingview.com/global/scan',
+      { 'Content-Type': 'application/json', Origin: 'https://www.tradingview.com', Referer: 'https://www.tradingview.com/', 'User-Agent': browserUA },
+      { method: 'POST', body: JSON.stringify({ symbols: { tickers: ['NSE:NIFTY'], query: { types: [] } }, columns: ['close'] }) }
+    )
+    // Charts and sector indices.
+    const to = new Date().toISOString().slice(0, 10)
+    const from = new Date(Date.now() - 10 * 86_400_000).toISOString().slice(0, 10)
+    checks.upstoxCandles = await probe(
+      `https://api.upstox.com/v3/historical-candle/${encodeURIComponent('NSE_INDEX|Nifty 50')}/days/1/${to}/${from}`,
+      { Accept: 'application/json', 'User-Agent': browserUA }
+    )
+    const now = Math.floor(Date.now() / 1000)
+    checks.moneycontrolCharts = await probe(
+      `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/history?symbol=RELIANCE&resolution=1D&from=${now - 864000}&to=${now}&countback=5&currencyCode=INR`,
+      { Accept: 'application/json', Origin: 'https://www.moneycontrol.com', Referer: 'https://www.moneycontrol.com/', 'User-Agent': browserUA }
+    )
+    // The last-resort provider; it refuses Vercel's IPs, so failing here is expected.
     checks.yahooFinance = await probe(
       'https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?interval=1d&range=1d',
       { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }
-    )
-    // Which Yahoo paths this deployment can actually use. They fail
-    // independently: the crumbed endpoints routinely refuse datacenter IPs
-    // while the keyless ones answer, and knowing which is which is the
-    // difference between "the feed is down" and "we asked the wrong way".
-    checks.yahooSparkBatch = await probe(
-      'https://query1.finance.yahoo.com/v7/finance/spark?symbols=RELIANCE.NS,TCS.NS&range=5d&interval=1d',
-      { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }
-    )
-    // The second price provider. Independent of Yahoo in company and
-    // infrastructure, so it is the one that matters when Yahoo refuses.
-    checks.stooq = await probe(
-      'https://stooq.com/q/l/?s=reliance.in+tcs.in&f=sd2t2ohlcv&h&e=csv',
-      { Accept: 'text/csv' }
     )
     checks.googleNewsRss = await probe(
       'https://news.google.com/rss/search?q=nifty&hl=en-IN&gl=IN&ceid=IN:en',
@@ -128,7 +141,7 @@ export async function GET(request: Request) {
 
   // Which tables exist. PostgREST answers 404 with code PGRST205 for a table
   // it does not know about, which is exactly the "migration never run" case.
-  let schema: { ok: boolean; missing: string[]; checked: number } | null = null
+  let schema: { ok: boolean; missing: string[]; checked: number; upToDate: boolean | null } | null = null
   if (!supabaseOnly && url && anonKey && checks.supabaseRest?.ok) {
     const missing: string[] = []
     await Promise.all(
@@ -151,15 +164,34 @@ export async function GET(request: Request) {
         }
       })
     )
-    schema = { ok: missing.length === 0, missing, checked: REQUIRED_TABLES.length }
+    // Migration 008 adds ensure_stock(), which watchlisting non-NIFTY stocks
+    // needs, and 007 was regenerated with the current constituents. PostgREST
+    // answers 404 for a function it does not know; any other status (the anon
+    // role is not allowed to call it) means the function exists.
+    let upToDate: boolean | null = null
+    try {
+      const rpc = await fetch(`${url}/rest/v1/rpc/ensure_stock`, {
+        method: 'POST',
+        headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_symbol: 'HEALTHCHECK', p_name: 'x' }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+        cache: 'no-store',
+      })
+      upToDate = rpc.status !== 404
+    } catch {
+      // Unknown rather than wrong.
+    }
+    schema = { ok: missing.length === 0, missing, checked: REQUIRED_TABLES.length, upToDate }
   }
 
   const missingEnv = Object.entries(env)
     .filter(([key, present]) => !present && key !== 'ANTHROPIC_API_KEY')
     .map(([key]) => key)
 
+  // Yahoo refusing Vercel's IPs is the known, handled case — every other
+  // provider is tried first — so it is not reported as a fault.
   const failedChecks = Object.entries(checks)
-    .filter(([, probe]) => !probe.ok)
+    .filter(([name, probe]) => !probe.ok && name !== 'yahooFinance')
     .map(([name]) => name)
 
   // One plain-English line, so the answer doesn't require reading the JSON.
@@ -182,6 +214,11 @@ export async function GET(request: Request) {
       `Supabase is reachable but ${schema.missing.length} of ${schema.checked} tables do not exist ` +
       `(${schema.missing.join(', ')}). Run database/schema.sql in the Supabase SQL editor — ` +
       'it creates everything in one go and is safe to run twice.'
+  } else if (schema && schema.upToDate === false) {
+    summary =
+      'Supabase is reachable, but the database predates the current NIFTY 50 list and the ' +
+      'watchlist-any-stock function. Run database/schema.sql once more in the Supabase SQL editor ' +
+      '(safe to re-run).'
   } else if (failedChecks.length > 0) {
     summary = `Supabase is healthy. Unreachable from this deployment: ${failedChecks.join(', ')}.`
   } else {

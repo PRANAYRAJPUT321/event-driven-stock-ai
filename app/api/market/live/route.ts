@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server'
-import { fetchMarketBar, CATEGORY_LABELS, HEATMAP_SYMBOLS } from '@/lib/market/yahooFinance'
+import { fetchMarketBar, CATEGORY_LABELS, HEATMAP_SYMBOLS } from '@/lib/market/quotes'
 
-// Yahoo sends no CORS headers, so the browser can't call it directly — this
-// route is the server-side proxy. Deliberately public (no auth): it returns
-// nothing user-specific, and the market bar renders on the login page too.
+// The quote providers send no CORS headers, so the browser can't call them
+// directly — this route is the server-side proxy. Deliberately public (no
+// auth): it returns nothing user-specific, and the market bar renders on the
+// login page too.
 //
 // force-dynamic keeps Next from prerendering this at build time, which would
 // otherwise bake whatever the build machine got (including a failure) into
 // the deployment. Upstream load is throttled by the Cache-Control header
 // below instead: the CDN serves one cached response to everyone for a
-// minute, so Yahoo sees roughly one round of requests per minute in total,
+// minute, so the providers see roughly one round of requests per minute in total,
 // not one per visitor.
 export const dynamic = 'force-dynamic'
 
@@ -31,10 +32,8 @@ export async function GET(request: Request) {
       return NextResponse.json(
         {
           error:
-            'Yahoo Finance returned no usable quotes for any tracked symbol. ' +
-            (failureReason
-              ? `The upstream said: ${failureReason}`
-              : 'This is usually upstream rate limiting — it normally clears on its own.'),
+            'No market-data provider returned a usable quote. ' +
+            (failureReason ? `The first failure: ${failureReason}` : 'It normally clears on its own within a minute.'),
           failed,
         },
         { status: 502 }

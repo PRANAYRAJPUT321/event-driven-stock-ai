@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
-import type { MarketQuote, QuoteCategory } from '@/lib/market/yahooFinance'
+import type { MarketQuote, QuoteCategory } from '@/lib/market/types'
 
 const CATEGORY_ORDER: QuoteCategory[] = ['domestic', 'international', 'commodity', 'currency']
 

@@ -15,7 +15,7 @@ import ImpactBreakdown from '@/components/ImpactBreakdown'
 import CompanyPicker from '@/components/CompanyPicker'
 import { NIFTY_50 } from '@/lib/market/indianEquities'
 import type { User } from '@supabase/supabase-js'
-import type { MarketQuote } from '@/lib/market/yahooFinance'
+import type { MarketQuote } from '@/lib/market/types'
 
 interface StockScore {
   id: string

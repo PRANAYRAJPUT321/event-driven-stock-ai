@@ -1,16 +1,15 @@
 /**
- * Keyless live quotes from Yahoo Finance's chart endpoint.
+ * Keyless quotes from Yahoo Finance — now the last provider tried.
  *
- * Why this endpoint: `query1.finance.yahoo.com/v8/finance/chart/{symbol}`
- * needs no API key, no signup and no session crumb (unlike v7/finance/quote
- * and v10/finance/quoteSummary, which now reject anonymous callers). It
- * covers indices, futures and FX with the same response shape, so one parser
- * serves every row in the market bar.
+ * Yahoo's chart, spark and quote endpoints were this app's only market feed
+ * until they began refusing Vercel's servers with HTTP 429 on every request.
+ * TradingView's screener and Upstox now serve quotes and history (see
+ * lib/market/quotes.ts and priceHistory.ts); this module remains as a
+ * fallback because it still answers from most other networks and costs
+ * nothing to try.
  *
  * It is an unofficial, undocumented endpoint: it can rate-limit, change field
- * names, or go away. Everything here is therefore read defensively and each
- * symbol is fetched independently via Promise.allSettled — one bad symbol
- * degrades to a missing tile, it never blanks the bar.
+ * names, or go away. Everything here is therefore read defensively.
  *
  * Must only be called server-side (the endpoint sends no CORS headers).
  */
@@ -20,186 +19,14 @@ import {
   fetchQuotesBatch,
   fetchSparkBatch,
   mapWithConcurrency,
-  recallLastGood,
-  rememberLastGood,
   yahooRequest,
   YAHOO_HOSTS,
   type BatchQuote,
 } from './yahooClient'
 import { fetchStooqDaily, fetchStooqQuotes, type StooqQuote } from './stooq'
-import { fetchFxQuotes, FRANKFURTER_SYMBOLS } from './frankfurter'
+import type { MarketQuote, QuoteCategory, QuoteSource, TrackedSymbol } from './types'
 
-export type QuoteCategory = 'domestic' | 'international' | 'commodity' | 'currency'
-
-export interface MarketQuote {
-  symbol: string
-  name: string
-  category: QuoteCategory
-  price: number
-  previousClose: number
-  change: number
-  changePct: number
-  currency: string
-  /** The upstream timestamp for the quote, ISO-8601. */
-  asOf: string | null
-  /** Which provider served this quote. Surfaced so the UI can say so. */
-  source?: QuoteSource
-  /**
-   * Recent closes, oldest first, for the tile sparkline. Present whenever the
-   * provider returned a series; a quote-only provider leaves it undefined
-   * rather than fabricating a shape.
-   */
-  spark?: number[]
-}
-
-export type QuoteSource =
-  | 'yahoo-spark'
-  | 'yahoo-quote'
-  | 'yahoo-chart'
-  | 'stooq'
-  | 'frankfurter'
-
-export interface TrackedSymbol {
-  symbol: string
-  name: string
-  category: QuoteCategory
-}
-
-/**
- * The bar's contents. Domestic first — this is an Indian-equity product, so
- * NIFTY/SENSEX should be what a user sees before the marquee moves.
- */
-/**
- * The compact set shown in the always-on header bar. Kept deliberately short:
- * a marquee people can actually read beats an exhaustive one they cannot.
- * Domestic first, because this is an Indian-equity product.
- */
-export const TRACKED_SYMBOLS: TrackedSymbol[] = [
-  { symbol: '^NSEI', name: 'NIFTY 50', category: 'domestic' },
-  { symbol: '^BSESN', name: 'SENSEX', category: 'domestic' },
-  { symbol: '^NSEBANK', name: 'BANK NIFTY', category: 'domestic' },
-  { symbol: '^CNXIT', name: 'NIFTY IT', category: 'domestic' },
-  { symbol: '^INDIAVIX', name: 'INDIA VIX', category: 'domestic' },
-
-  { symbol: '^GSPC', name: 'S&P 500', category: 'international' },
-  { symbol: '^IXIC', name: 'NASDAQ', category: 'international' },
-  { symbol: '^DJI', name: 'DOW JONES', category: 'international' },
-  { symbol: '^FTSE', name: 'FTSE 100', category: 'international' },
-  { symbol: '^N225', name: 'NIKKEI 225', category: 'international' },
-  { symbol: '^HSI', name: 'HANG SENG', category: 'international' },
-
-  { symbol: 'GC=F', name: 'GOLD', category: 'commodity' },
-  { symbol: 'SI=F', name: 'SILVER', category: 'commodity' },
-  { symbol: 'CL=F', name: 'WTI CRUDE', category: 'commodity' },
-  { symbol: 'BZ=F', name: 'BRENT CRUDE', category: 'commodity' },
-
-  { symbol: 'USDINR=X', name: 'USD/INR', category: 'currency' },
-  { symbol: 'EURINR=X', name: 'EUR/INR', category: 'currency' },
-]
-
-/**
- * The full set behind the /markets heatmaps. Everything the bar carries, plus
- * the breadth a heatmap is actually for: Indian sector indices, the major
- * exchanges of every region, the commodity complex, and the INR crosses that
- * matter to Indian importers and exporters.
- *
- * Each entry is one upstream request, so this list is the page's cost — which
- * is why it is fetched once per minute at the edge and shared by all callers
- * rather than per visitor.
- */
-export const HEATMAP_SYMBOLS: TrackedSymbol[] = [
-  // ── India: headline and sector indices ──────────────────────────────
-  { symbol: '^NSEI', name: 'NIFTY 50', category: 'domestic' },
-  { symbol: '^BSESN', name: 'SENSEX', category: 'domestic' },
-  { symbol: '^NSEBANK', name: 'BANK NIFTY', category: 'domestic' },
-  { symbol: '^CNXIT', name: 'NIFTY IT', category: 'domestic' },
-  { symbol: '^CNXAUTO', name: 'NIFTY AUTO', category: 'domestic' },
-  { symbol: '^CNXPHARMA', name: 'NIFTY PHARMA', category: 'domestic' },
-  { symbol: '^CNXFMCG', name: 'NIFTY FMCG', category: 'domestic' },
-  { symbol: '^CNXMETAL', name: 'NIFTY METAL', category: 'domestic' },
-  { symbol: '^CNXENERGY', name: 'NIFTY ENERGY', category: 'domestic' },
-  { symbol: '^CNXREALTY', name: 'NIFTY REALTY', category: 'domestic' },
-  { symbol: '^CNXINFRA', name: 'NIFTY INFRA', category: 'domestic' },
-  { symbol: '^CNXPSUBANK', name: 'NIFTY PSU BANK', category: 'domestic' },
-  { symbol: '^NSEMDCP50', name: 'NIFTY MIDCAP 50', category: 'domestic' },
-  { symbol: '^INDIAVIX', name: 'INDIA VIX', category: 'domestic' },
-
-  // ── Americas ────────────────────────────────────────────────────────
-  { symbol: '^GSPC', name: 'S&P 500', category: 'international' },
-  { symbol: '^IXIC', name: 'NASDAQ COMPOSITE', category: 'international' },
-  { symbol: '^DJI', name: 'DOW JONES', category: 'international' },
-  { symbol: '^RUT', name: 'RUSSELL 2000', category: 'international' },
-  { symbol: '^VIX', name: 'CBOE VIX', category: 'international' },
-  { symbol: '^GSPTSE', name: 'TSX COMPOSITE', category: 'international' },
-  { symbol: '^BVSP', name: 'BOVESPA', category: 'international' },
-  { symbol: '^MXX', name: 'IPC MEXICO', category: 'international' },
-
-  // ── Europe ──────────────────────────────────────────────────────────
-  { symbol: '^FTSE', name: 'FTSE 100', category: 'international' },
-  { symbol: '^GDAXI', name: 'DAX', category: 'international' },
-  { symbol: '^FCHI', name: 'CAC 40', category: 'international' },
-  { symbol: '^STOXX50E', name: 'EURO STOXX 50', category: 'international' },
-  { symbol: '^IBEX', name: 'IBEX 35', category: 'international' },
-  { symbol: 'FTSEMIB.MI', name: 'FTSE MIB', category: 'international' },
-  { symbol: '^AEX', name: 'AEX', category: 'international' },
-  { symbol: '^SSMI', name: 'SMI', category: 'international' },
-
-  // ── Asia-Pacific & Middle East ──────────────────────────────────────
-  { symbol: '^N225', name: 'NIKKEI 225', category: 'international' },
-  { symbol: '^HSI', name: 'HANG SENG', category: 'international' },
-  { symbol: '000001.SS', name: 'SHANGHAI COMPOSITE', category: 'international' },
-  { symbol: '399001.SZ', name: 'SHENZHEN COMPONENT', category: 'international' },
-  { symbol: '^KS11', name: 'KOSPI', category: 'international' },
-  { symbol: '^TWII', name: 'TAIWAN WEIGHTED', category: 'international' },
-  { symbol: '^AXJO', name: 'ASX 200', category: 'international' },
-  { symbol: '^STI', name: 'STRAITS TIMES', category: 'international' },
-  { symbol: '^JKSE', name: 'JAKARTA COMPOSITE', category: 'international' },
-  { symbol: '^KLSE', name: 'FTSE BURSA MALAYSIA', category: 'international' },
-  { symbol: '^TA125.TA', name: 'TA-125 ISRAEL', category: 'international' },
-
-  // ── Commodities ─────────────────────────────────────────────────────
-  { symbol: 'GC=F', name: 'GOLD', category: 'commodity' },
-  { symbol: 'SI=F', name: 'SILVER', category: 'commodity' },
-  { symbol: 'PL=F', name: 'PLATINUM', category: 'commodity' },
-  { symbol: 'PA=F', name: 'PALLADIUM', category: 'commodity' },
-  { symbol: 'HG=F', name: 'COPPER', category: 'commodity' },
-  { symbol: 'CL=F', name: 'WTI CRUDE', category: 'commodity' },
-  { symbol: 'BZ=F', name: 'BRENT CRUDE', category: 'commodity' },
-  { symbol: 'NG=F', name: 'NATURAL GAS', category: 'commodity' },
-  { symbol: 'RB=F', name: 'GASOLINE', category: 'commodity' },
-  { symbol: 'ZC=F', name: 'CORN', category: 'commodity' },
-  { symbol: 'ZW=F', name: 'WHEAT', category: 'commodity' },
-  { symbol: 'ZS=F', name: 'SOYBEAN', category: 'commodity' },
-  { symbol: 'SB=F', name: 'SUGAR', category: 'commodity' },
-  { symbol: 'KC=F', name: 'COFFEE', category: 'commodity' },
-  { symbol: 'CT=F', name: 'COTTON', category: 'commodity' },
-
-  // ── Currencies ──────────────────────────────────────────────────────
-  { symbol: 'USDINR=X', name: 'USD/INR', category: 'currency' },
-  { symbol: 'EURINR=X', name: 'EUR/INR', category: 'currency' },
-  { symbol: 'GBPINR=X', name: 'GBP/INR', category: 'currency' },
-  { symbol: 'JPYINR=X', name: 'JPY/INR', category: 'currency' },
-  { symbol: 'AEDINR=X', name: 'AED/INR', category: 'currency' },
-  { symbol: 'CNYINR=X', name: 'CNY/INR', category: 'currency' },
-  { symbol: 'EURUSD=X', name: 'EUR/USD', category: 'currency' },
-  { symbol: 'GBPUSD=X', name: 'GBP/USD', category: 'currency' },
-  { symbol: 'USDJPY=X', name: 'USD/JPY', category: 'currency' },
-  { symbol: 'DX-Y.NYB', name: 'DOLLAR INDEX', category: 'currency' },
-]
-
-export const CATEGORY_LABELS: Record<QuoteCategory, string> = {
-  domestic: 'India',
-  international: 'Global',
-  commodity: 'Commodities',
-  currency: 'Currencies',
-}
-
-// Yahoo rejects requests without a browser-shaped User-Agent.
-const USER_AGENT =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
-
-const HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']
-const TIMEOUT_MS = 6000
+export type { MarketQuote, QuoteCategory, QuoteSource, TrackedSymbol } from './types'
 
 function num(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
@@ -305,61 +132,6 @@ function fromBatch(tracked: TrackedSymbol, row: BatchQuote): MarketQuote | null 
   }
 }
 
-/**
- * The last good quote for each individual symbol.
- *
- * The all-or-nothing cache this replaces threw away partial success: when the
- * upstream was rate-limiting and answered five symbols out of fifty-two, those
- * five were discarded because the payload "failed". Keeping them per symbol
- * means a trickle accumulates — five this minute, five more the next — until
- * the grid is full, and it stays full as long as the trickle continues. On a
- * feed that refuses volume but not existence, this is the difference between
- * a blank page and a working one.
- *
- * Entries carry their own age so the caller can say which tiles are fresh.
- */
-const quoteMemory = new Map<string, { quote: MarketQuote; at: number }>()
-/** Long enough to ride out a bad spell, short enough that nothing goes stale unnoticed. */
-const QUOTE_MEMORY_TTL_MS = 30 * 60 * 1000
-
-/**
- * Folds this fetch's successes into memory and returns the union: everything
- * just fetched, plus anything remembered that the fetch did not cover.
- */
-function mergeWithMemory(
-  tracked: TrackedSymbol[],
-  fresh: MarketQuote[]
-): { quotes: MarketQuote[]; fromMemory: number; oldestAgeSeconds: number } {
-  const now = Date.now()
-  const freshBySymbol = new Map(fresh.map((q) => [q.symbol, q]))
-
-  for (const quote of fresh) quoteMemory.set(quote.symbol, { quote, at: now })
-
-  const quotes: MarketQuote[] = []
-  let fromMemory = 0
-  let oldest = 0
-
-  for (const t of tracked) {
-    const justFetched = freshBySymbol.get(t.symbol)
-    if (justFetched) {
-      quotes.push(justFetched)
-      continue
-    }
-    const remembered = quoteMemory.get(t.symbol)
-    if (!remembered) continue
-    const age = now - remembered.at
-    if (age > QUOTE_MEMORY_TTL_MS) {
-      quoteMemory.delete(t.symbol)
-      continue
-    }
-    quotes.push(remembered.quote)
-    fromMemory++
-    oldest = Math.max(oldest, age)
-  }
-
-  return { quotes, fromMemory, oldestAgeSeconds: Math.round(oldest / 1000) }
-}
-
 /** Where the next throttled sweep begins. See the rotation note below. */
 let fallbackCursor = 0
 
@@ -414,7 +186,7 @@ async function fromStooq(
  * concurrency, because firing the remainder all at once is what produced the
  * rate limiting this function exists to avoid.
  */
-async function resolveQuotes(
+export async function resolveYahooQuotes(
   tracked: TrackedSymbol[],
   revalidateSeconds: number
 ): Promise<{ quotes: MarketQuote[]; failed: string[]; failureReason?: string }> {
@@ -423,23 +195,6 @@ async function resolveQuotes(
   let failureReason: string | undefined
 
   let pending = tracked
-
-  // 0. Currencies, from the ECB's published rates. Every Yahoo FX symbol is
-  //    currently refused and the tab was empty; this is the one source the
-  //    deployment's own diagnostics prove it can reach for these pairs.
-  const fxWanted = pending.filter((t) => FRANKFURTER_SYMBOLS.has(t.symbol))
-  if (fxWanted.length > 0) {
-    try {
-      const fx = await fetchFxQuotes(fxWanted)
-      if (fx.length > 0) {
-        quotes.push(...fx)
-        const got = new Set(fx.map((q) => q.symbol))
-        pending = pending.filter((t) => !got.has(t.symbol))
-      }
-    } catch (err: any) {
-      failureReason ??= `fx failed: ${err?.message || 'unknown error'}`
-    }
-  }
 
   // 1. Spark first: one request per forty symbols, no session required. This
   //    is the path that keeps the grid inside Yahoo's tolerance.
@@ -543,111 +298,6 @@ async function resolveQuotes(
   }
 
   return { quotes, failed, failureReason }
-}
-
-export interface MarketBarData {
-  quotes: MarketQuote[]
-  /** Symbols that failed, so the UI/logs can show partial-data honestly. */
-  failed: string[]
-  /**
-   * Why the first failure happened. Without this the caller can only guess at
-   * the cause, and the guess it used to print — "usually upstream rate
-   * limiting" — was wrong whenever the real answer was a blocked host or a
-   * DNS failure, which sent people looking in the wrong place.
-   */
-  failureReason?: string
-  /** True when some tiles came from memory rather than this fetch. */
-  stale?: boolean
-  staleAgeSeconds?: number
-  /** How many of the quotes were remembered rather than just fetched. */
-  fromMemory?: number
-  fetchedAt: string
-}
-
-/**
- * Fetches every tracked symbol in parallel. Never throws for a partial
- * failure — callers get whatever resolved plus the list that didn't, and only
- * an empty `quotes` array means the upstream is genuinely unavailable.
- */
-export async function fetchMarketBar(
-  revalidateSeconds = 60,
-  symbols: TrackedSymbol[] = TRACKED_SYMBOLS
-): Promise<MarketBarData> {
-  const { quotes: fresh, failed, failureReason } = await resolveQuotes(symbols, revalidateSeconds)
-
-  // Fold this fetch into what is already known. A rate-limiting upstream that
-  // answers a handful of symbols a minute now builds the grid up over
-  // successive refreshes instead of each attempt discarding the last.
-  const { quotes, fromMemory, oldestAgeSeconds } = mergeWithMemory(symbols, fresh)
-
-  return {
-    quotes,
-    failed,
-    failureReason,
-    stale: fromMemory > 0,
-    staleAgeSeconds: fromMemory > 0 ? oldestAgeSeconds : undefined,
-    fromMemory,
-    fetchedAt: new Date().toISOString(),
-  }
-}
-
-/**
- * Live quotes for a list of NSE-listed equities.
- *
- * Separate from fetchMarketBar so the index/commodity request and the
- * fifty-odd equity requests do not compound into one very slow call — each
- * endpoint stays inside a serverless function's budget on its own.
- */
-export async function fetchEquityQuotes(
-  constituents: { symbol: string; name: string; sector: string }[],
-  revalidateSeconds = 60
-): Promise<{
-  quotes: (MarketQuote & { sector: string })[]
-  failed: string[]
-  failureReason?: string
-  stale?: boolean
-  staleAgeSeconds?: number
-  fromMemory?: number
-  fetchedAt: string
-}> {
-  // .NS is Yahoo's suffix for the NSE. The category is only used for grouping
-  // in the bar, which equities never appear in.
-  const tracked: TrackedSymbol[] = constituents.map((c) => ({
-    symbol: `${c.symbol}.NS`,
-    name: c.name,
-    category: 'domestic',
-  }))
-  const sectorBySymbol = new Map(constituents.map((c) => [`${c.symbol}.NS`, c.sector]))
-  const nseBySymbol = new Map(constituents.map((c) => [`${c.symbol}.NS`, c.symbol]))
-
-  const { quotes: raw, failed: rawFailed, failureReason } = await resolveQuotes(
-    tracked,
-    revalidateSeconds
-  )
-
-  // Report the NSE symbol, not Yahoo's suffixed form — this is what the rest
-  // of the app links and stores.
-  const failed = rawFailed.map((s) => nseBySymbol.get(s) ?? s)
-
-  // Same accumulation as the bar: a feed that answers five constituents a
-  // minute fills the grid over a few refreshes rather than each attempt
-  // throwing away what the last one managed to get.
-  const merged = mergeWithMemory(tracked, raw)
-  const withSector = merged.quotes.map((q) => ({
-    ...q,
-    symbol: nseBySymbol.get(q.symbol) ?? q.symbol,
-    sector: sectorBySymbol.get(q.symbol) ?? '',
-  }))
-
-  return {
-    quotes: withSector,
-    failed,
-    failureReason,
-    stale: merged.fromMemory > 0,
-    staleAgeSeconds: merged.fromMemory > 0 ? merged.oldestAgeSeconds : undefined,
-    fromMemory: merged.fromMemory,
-    fetchedAt: new Date().toISOString(),
-  }
 }
 
 /** Single-symbol lookup for the stock profile page. Throws on failure. */

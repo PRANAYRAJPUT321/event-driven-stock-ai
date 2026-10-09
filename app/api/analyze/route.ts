@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/server'
 import { classifyEvent, generateCounterArgument } from '@/lib/ai/eventClassifier'
 import { buildCounterArgumentFromRules, classifyEventByRules } from '@/lib/ai/ruleClassifier'
-import { fetchStockMetrics, type StockMetrics } from '@/lib/market/realMetrics'
+import { fetchStockMetricsMany, type StockMetrics } from '@/lib/market/realMetrics'
 import {
   getHistoricalReaction,
   historicalReturnToScore,
@@ -173,16 +173,9 @@ export async function POST(request: NextRequest) {
         ? 50 + classification.magnitude / 2
         : 50
 
-    // One fetch per candidate, in parallel. Each pulls a year of daily closes
-    // (for technicals) and, where Yahoo's fundamentals tier answers, the
-    // valuation and company figures.
-    const metricsSettled = await Promise.allSettled(
-      candidates.map((c) => fetchStockMetrics(c.symbol, c.name, c.sector))
-    )
-    const metricsBySymbol = new Map<string, StockMetrics>()
-    metricsSettled.forEach((outcome, i) => {
-      if (outcome.status === 'fulfilled') metricsBySymbol.set(candidates[i].symbol, outcome.value)
-    })
+    // One screener request covers every candidate's price, valuation and
+    // fundamentals; each also gets a year of daily closes for volatility.
+    const metricsBySymbol: Map<string, StockMetrics> = await fetchStockMetricsMany(candidates)
 
     // Valuation is relative, so the benchmark is the median of the peers
     // actually in this analysis — measured, rather than a hardcoded sector

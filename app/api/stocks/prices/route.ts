@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { fetchEquityQuotes } from '@/lib/market/yahooFinance'
+import { fetchEquityQuotes } from '@/lib/market/quotes'
 
 /**
  * Current prices for a caller-supplied list of NSE symbols.
@@ -32,7 +32,8 @@ export async function GET(request: NextRequest) {
   try {
     const { quotes, failed, fetchedAt } = await fetchEquityQuotes(
       symbols.map((symbol) => ({ symbol, name: symbol, sector: '' })),
-      REVALIDATE_SECONDS
+      REVALIDATE_SECONDS,
+      { withSparks: false }
     )
 
     // Keyed by symbol so callers can look up without scanning.

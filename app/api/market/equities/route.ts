@@ -1,14 +1,13 @@
 import { NextResponse } from 'next/server'
-import { fetchEquityQuotes } from '@/lib/market/yahooFinance'
-import { NIFTY_50 } from '@/lib/market/indianEquities'
+import { fetchEquityQuotes } from '@/lib/market/quotes'
+import { NIFTY_50, NIFTY_50_AS_OF } from '@/lib/market/indianEquities'
 
 /**
  * Live quotes for every NIFTY 50 constituent, for the Indian-equities heatmap
  * and for the scoring engine's technical inputs.
  *
- * Keyless, like the rest of the market layer: Yahoo's chart endpoint answers
- * anonymous callers, and one edge-cached response serves every visitor for a
- * minute rather than each of them triggering fifty upstream requests.
+ * Keyless, like the rest of the market layer: one screener request covers all
+ * fifty, and one edge-cached response serves every visitor for a minute.
  */
 export const dynamic = 'force-dynamic'
 
@@ -25,10 +24,8 @@ export async function GET() {
       return NextResponse.json(
         {
           error:
-            'Yahoo Finance returned no usable quotes for any NIFTY 50 constituent. ' +
-            (failureReason
-              ? `The upstream said: ${failureReason}`
-              : 'This is usually upstream rate limiting and normally clears on its own.'),
+            'No market-data provider returned a usable quote for any NIFTY 50 constituent. ' +
+            (failureReason ? `The first failure: ${failureReason}` : 'It normally clears on its own within a minute.'),
           failed,
         },
         { status: 502 }
@@ -44,6 +41,7 @@ export async function GET() {
         fromMemory: fromMemory ?? 0,
         fetchedAt,
         total: NIFTY_50.length,
+        constituentsAsOf: NIFTY_50_AS_OF,
       },
       {
         headers: {

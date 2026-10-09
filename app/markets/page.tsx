@@ -6,7 +6,7 @@ import { createClient, getSessionUser } from '@/lib/supabase/client'
 import AppShell from '@/components/layout/AppShell'
 import Sparkline from '@/components/charts/Sparkline'
 import type { User } from '@supabase/supabase-js'
-import type { MarketQuote } from '@/lib/market/yahooFinance'
+import type { MarketQuote } from '@/lib/market/types'
 
 interface CryptoCoin {
   symbol: string
