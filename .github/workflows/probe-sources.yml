@@ -1,0 +1,19 @@
+# Temporary: probes market-data sources from a cloud IP (see scripts/probe-sources.mjs).
+name: probe-data-sources
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/event-driven-stock-ai-tj6oic]
+    paths: [scripts/probe-sources.mjs, .github/workflows/probe-sources.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/probe-sources.mjs
