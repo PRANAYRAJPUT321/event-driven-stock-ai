@@ -17,6 +17,11 @@ function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const message = searchParams.get('message')
+  // Where to return after signing in. Only same-site paths are honoured, so a
+  // crafted link cannot bounce a fresh session to another origin.
+  const nextParam = searchParams.get('next')
+  const next =
+    nextParam && /^\/(?![\/\\])/.test(nextParam) ? nextParam : '/dashboard'
   const supabase = createClient()
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -32,7 +37,7 @@ function LoginForm() {
         setBackendUnreachable(isUnreachable(authError))
         return
       }
-      router.push('/dashboard')
+      router.push(next)
     } catch (err: any) {
       setError(describeAuthError(err))
       setBackendUnreachable(isUnreachable(err))

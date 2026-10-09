@@ -171,6 +171,19 @@ section('Price history: ranges and provider fallback')
   checkThat('1y has a year of sessions', h.candles.length >= 240, `bars=${h.candles.length}`)
 }
 {
+  // The daily series stops at the previous session while the market is open;
+  // today's intraday bars must be folded into one real bar at the end.
+  const h = await history.fetchPriceHistory('RELIANCE', '6m')
+  const intra = candles.parseUpstox(fixture('upstox-intraday-5m.json'))
+  const last = h.candles.at(-1)
+  const istDay = (t) => new Date(t + 19800000).toISOString().slice(0, 10)
+  check('daily chart ends with today', istDay(last.t), istDay(intra.at(-1).t))
+  check('today’s bar closes at the latest intraday price', last.c, intra.at(-1).c)
+  check('today’s bar opens at the first intraday price', last.o, intra[0].o)
+  check('today’s high is the session high', last.h, Math.max(...intra.map((c) => c.h)))
+  check('only one bar per day', new Set(h.candles.map((c) => istDay(c.t))).size, h.candles.length)
+}
+{
   const h = await history.fetchPriceHistory('RELIANCE', '1d')
   check('1d is intraday', [h.intraday, h.interval], [true, '5 min'])
   check('1d keeps one session', new Set(h.candles.map((c) => new Date(c.t + 19800000).toISOString().slice(0, 10))).size, 1)

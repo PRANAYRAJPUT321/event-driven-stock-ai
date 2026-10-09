@@ -59,6 +59,30 @@
   --overlay-bg: rgba(2, 3, 8, 0.7);
   --panel-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset, 0 22px 44px -22px rgba(0, 0, 0, 0.75);
   --tile-shadow: 0 14px 28px -14px rgba(0, 0, 0, 0.75), 0 0 18px -8px var(--glow);
+
+  /* Chart series (price, SMA 50, SMA 200). Validated as a set against this
+     surface with the dataviz palette checks: lightness band, chroma floor,
+     CVD separation (worst adjacent ΔE 8.1) and contrast. */
+  --chart-1: #2a9fd0;
+  --chart-2: #e0409f;
+  --chart-3: #c08800;
+  --chart-grid: #161d33;
+  --chart-axis: #5c6b8a;
+
+  /* Diverging heat ramp (losses ← neutral → gains), seven steps. */
+  --heat-n3: #a3263f;
+  --heat-n2: #7a2438;
+  --heat-n1: #4a2131;
+  --heat-0: #1f2638;
+  --heat-p1: #173d33;
+  --heat-p2: #11603f;
+  --heat-p3: #0c8a4f;
+  --heat-ink: #f2f7ff;
+  --heat-ink-strong: #ffffff;
+
+  --aurora-1: rgba(0, 229, 255, 0.10);
+  --aurora-2: rgba(255, 62, 200, 0.07);
+  --panel-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0) 40%);
 }
 
 :root[data-theme='light'] {
@@ -101,6 +125,46 @@
   --overlay-bg: rgba(8, 17, 31, 0.35);
   --panel-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.8) inset, 0 16px 32px -20px rgba(8, 17, 31, 0.28);
   --tile-shadow: 0 12px 24px -14px rgba(8, 17, 31, 0.3), 0 0 14px -8px var(--glow);
+
+  --chart-1: #0d7ab8;
+  --chart-2: #c4157c;
+  --chart-3: #a06a00;
+  --chart-grid: #e6edf5;
+  --chart-axis: #75859b;
+
+  --heat-n3: #c8324f;
+  --heat-n2: #e47e8f;
+  --heat-n1: #f5c4cc;
+  --heat-0: #e8edf3;
+  --heat-p1: #bfe6cf;
+  --heat-p2: #6ec797;
+  --heat-p3: #1f9a5c;
+  --heat-ink: #08111f;
+  --heat-ink-strong: #ffffff;
+
+  --aurora-1: rgba(0, 113, 140, 0.08);
+  --aurora-2: rgba(179, 0, 126, 0.05);
+  --panel-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0) 40%);
+}
+
+/* Blue ↔ orange alternative to the red ↔ green heat ramp, for readers who
+   cannot separate red from green. Opt-in from the heatmap legend; it sets
+   data-heat="cvd" on <html>. */
+:root[data-heat='cvd'] {
+  --heat-n3: #b5541c;
+  --heat-n2: #8a4520;
+  --heat-n1: #4d3224;
+  --heat-p1: #1d3552;
+  --heat-p2: #1f4f86;
+  --heat-p3: #2a6fc0;
+}
+:root[data-theme='light'][data-heat='cvd'] {
+  --heat-n3: #c4561a;
+  --heat-n2: #e39a6a;
+  --heat-n1: #f5d2bb;
+  --heat-p1: #c3d8f0;
+  --heat-p2: #7fa9dc;
+  --heat-p3: #2f6fbf;
 }
 
 /* No-JS / script-blocked fallback only — the inline script always writes an
@@ -139,6 +203,26 @@
     --overlay-bg: rgba(8, 17, 31, 0.35);
     --panel-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.8) inset, 0 16px 32px -20px rgba(8, 17, 31, 0.28);
     --tile-shadow: 0 12px 24px -14px rgba(8, 17, 31, 0.3), 0 0 14px -8px var(--glow);
+
+    --chart-1: #0d7ab8;
+    --chart-2: #c4157c;
+    --chart-3: #a06a00;
+    --chart-grid: #e6edf5;
+    --chart-axis: #75859b;
+
+    --heat-n3: #c8324f;
+    --heat-n2: #e47e8f;
+    --heat-n1: #f5c4cc;
+    --heat-0: #e8edf3;
+    --heat-p1: #bfe6cf;
+    --heat-p2: #6ec797;
+    --heat-p3: #1f9a5c;
+    --heat-ink: #08111f;
+    --heat-ink-strong: #ffffff;
+
+    --aurora-1: rgba(0, 113, 140, 0.08);
+    --aurora-2: rgba(179, 0, 126, 0.05);
+    --panel-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0) 40%);
   }
 }
 
@@ -190,10 +274,11 @@ body {
    whole track past the viewport instead of letting the inner element
    scroll. Fixing it here covers every page at once. */
 .panel {
-  background: var(--surface);
+  background: var(--panel-grad), var(--surface);
   border: 1px solid var(--border);
   border-radius: 16px;
   min-width: 0;
+  box-shadow: var(--panel-shadow);
 }
 
 .panel-elevated {
@@ -216,7 +301,10 @@ body {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse 80% 50% at 50% -10%, var(--halo), transparent);
+  background:
+    radial-gradient(ellipse 70% 45% at 15% -5%, var(--aurora-1), transparent 70%),
+    radial-gradient(ellipse 60% 40% at 90% 0%, var(--aurora-2), transparent 70%),
+    radial-gradient(ellipse 80% 50% at 50% -10%, var(--halo), transparent);
   pointer-events: none;
 }
 
@@ -382,4 +470,163 @@ body {
   html {
     scroll-behavior: auto;
   }
+}
+
+/* ---- buttons, chips, inputs ----
+   Shared so every page's primary action, secondary action and filter chip
+   look and behave alike in both themes. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  padding: 0.55rem 1rem;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+  white-space: nowrap;
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 0 0 1px var(--accent-dim), 0 8px 24px -10px var(--glow);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-bright);
+}
+.btn-ghost {
+  background: var(--surface);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-bright);
+  background: var(--surface-hover);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.3rem 0.75rem;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+.chip:hover {
+  color: var(--text);
+  border-color: var(--border-bright);
+}
+.chip[aria-pressed='true'],
+.chip-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.segmented button {
+  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.3rem 0.6rem;
+  border-radius: 7px;
+  color: var(--text-muted);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.segmented button:hover {
+  color: var(--text);
+}
+.segmented button[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 0 0 1px var(--border-bright);
+}
+.input {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 0.875rem;
+  padding: 0.55rem 0.8rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.input::placeholder {
+  color: var(--text-faint);
+}
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+/* Zero specificity, so a component's own focus treatment (outline-none on
+   the search input, for one) wins without !important. */
+:where(:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.eyebrow {
+  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+}
+.stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.text-up {
+  color: var(--buy);
+}
+.text-down {
+  color: var(--avoid);
+}
+.hairline {
+  border-color: var(--border);
+}
+/* A tooltip that floats over charts; positioned by the chart itself. */
+.chart-tooltip {
+  position: absolute;
+  pointer-events: none;
+  z-index: 20;
+  min-width: 150px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-bright);
+  border-radius: 10px;
+  padding: 0.6rem 0.75rem;
+  box-shadow: 0 16px 32px -16px rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  scrollbar-width: none;
 }

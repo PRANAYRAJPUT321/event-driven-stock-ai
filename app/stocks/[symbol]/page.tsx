@@ -1,217 +1,307 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { createClient, getSessionUser } from '@/lib/supabase/client'
 import AppShell from '@/components/layout/AppShell'
-import { findEquity } from '@/lib/market/indianEquities'
+import PriceChart, { PriceTable, type ChartCandle, type ChartMode } from '@/components/charts/PriceChart'
+import Sparkline from '@/components/charts/Sparkline'
+import CompanyLogo from '@/components/stock/CompanyLogo'
+import PerformanceBars from '@/components/stock/PerformanceBars'
+import RangeBar from '@/components/stock/RangeBar'
+import TechnicalPanel from '@/components/stock/TechnicalPanel'
+import {
+  formatCount,
+  formatDateIST,
+  formatINR,
+  formatINRCompact,
+  formatPct,
+  formatPrice,
+  formatRatio,
+  formatRelative,
+  nseSessionState,
+} from '@/lib/format'
+import type { StockProfile } from '@/lib/market/stockProfile'
 import type { User } from '@supabase/supabase-js'
 
-interface Quote {
+type Range = '1d' | '5d' | '1m' | '6m' | 'ytd' | '1y' | '5y' | 'max'
+
+const RANGES: { id: Range; label: string }[] = [
+  { id: '1d', label: '1D' },
+  { id: '5d', label: '5D' },
+  { id: '1m', label: '1M' },
+  { id: '6m', label: '6M' },
+  { id: 'ytd', label: 'YTD' },
+  { id: '1y', label: '1Y' },
+  { id: '5y', label: '5Y' },
+  { id: 'max', label: 'Max' },
+]
+
+const SOURCE_NAMES: Record<string, string> = {
+  tradingview: 'TradingView screener',
+  upstox: 'Upstox',
+  moneycontrol: 'Moneycontrol',
+  groww: 'Groww',
+  yahoo: 'Yahoo Finance',
+}
+
+interface History {
+  candles: ChartCandle[]
+  interval: string
+  intraday: boolean
+  ohlc: boolean
+  previousClose: number | null
+  source: string
+  range: Range
+}
+
+interface Peer {
   symbol: string
-  name: string | null
-  currency: string | null
-  price: number | null
-  changePct: number | null
-  marketCap: number | null
-  peRatio: number | null
-  pbRatio: number | null
-  dividendYield: number | null
-  week52High: number | null
-  week52Low: number | null
-  analystRecommendationKey: string | null
-  analystRecommendationMean: number | null
-  analystCount: number | null
-  targetMean: number | null
-  targetHigh: number | null
-  targetLow: number | null
-  recommendationBreakdown: {
-    strongBuy: number | null
-    buy: number | null
-    hold: number | null
-    sell: number | null
-    strongSell: number | null
-  }
-  /**
-   * Set when Yahoo's fundamentals/analyst endpoint could not be reached. It
-   * needs a session cookie and crumb and can refuse without notice; price and
-   * history do not. The page says so rather than showing empty cells.
-   */
-  fundamentalsError: string | null
+  name: string
+  sector: string
+  price: number
+  changePct: number
+  spark?: number[]
 }
 
-interface HistoryPoint {
-  date: string
-  close: number
+interface NewsItem {
+  title: string
+  url: string
+  source: string
+  publishedAt: string | null
 }
 
-/**
- * Computed from the price series by /api/stocks/history. These are always
- * available when the chart is, which matters because Yahoo's fundamentals
- * endpoint is the flaky tier — see `fundamentalsError` below.
- */
-interface DerivedStats {
-  periodHigh: number | null
-  periodLow: number | null
-  sma50: number | null
-  sma200: number | null
-  volatilityPct: number | null
-  changePctInPeriod: number | null
+interface Suggestion {
+  symbol: string
+  name: string
+  inNifty50: boolean
 }
 
-const QUICK_SYMBOLS = ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK']
-
-const RECOMMENDATION_STYLE: Record<string, string> = {
-  strong_buy: 'text-buy bg-buy-dim border-buy-dim',
-  buy: 'text-buy bg-buy-dim border-buy-dim',
-  hold: 'text-hold bg-hold-dim border-hold-dim',
-  sell: 'text-avoid bg-avoid-dim border-avoid-dim',
-  strong_sell: 'text-avoid bg-avoid-dim border-avoid-dim',
+function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="py-2.5 flex items-baseline justify-between gap-3 border-b border-border last:border-b-0">
+      <dt className="text-xs text-ink-muted">{label}</dt>
+      <dd className="text-right">
+        <span className="mono-tabular text-sm font-semibold text-ink">{value}</span>
+        {hint && <span className="block text-[10px] text-ink-faint">{hint}</span>}
+      </dd>
+    </div>
+  )
 }
 
-function formatMarketCap(cap: number | null): string {
-  if (!cap) return '—'
-  if (cap >= 1e12) return `₹${(cap / 1e12).toFixed(2)}T`
-  if (cap >= 1e9) return `₹${(cap / 1e9).toFixed(2)}B`
-  if (cap >= 1e7) return `₹${(cap / 1e7).toFixed(2)}Cr`
-  return `₹${cap.toFixed(0)}`
+function Signed({ value }: { value: number | null }) {
+  if (value === null) return <span className="text-ink-faint">—</span>
+  return (
+    <span className={value >= 0 ? 'text-up' : 'text-down'}>
+      {value >= 0 ? '▲' : '▼'} {formatPct(value)}
+    </span>
+  )
 }
 
-export default function StockProfile({ params }: { params: { symbol: string } }) {
+function MarginBar({ label, value }: { label: string; value: number | null }) {
+  const width = value === null ? 0 : Math.min(100, Math.max(0, value))
+  return (
+    <div>
+      <div className="flex justify-between text-xs mb-1">
+        <span className="text-ink-muted">{label}</span>
+        <span className="mono-tabular font-semibold text-ink">{value === null ? '—' : formatPct(value, { signed: false })}</span>
+      </div>
+      <div className="h-1.5 rounded-full bg-surface-2 overflow-hidden" aria-hidden="true">
+        <div className="h-full rounded-full" style={{ width: `${width}%`, background: 'var(--chart-1)' }} />
+      </div>
+    </div>
+  )
+}
+
+export default function StockProfilePage({ params }: { params: { symbol: string } }) {
   const router = useRouter()
   const supabase = createClient()
-  const [user, setUser] = useState<User | null>(null)
-  const [quote, setQuote] = useState<Quote | null>(null)
-  const [history, setHistory] = useState<HistoryPoint[]>([])
-  const [stats, setStats] = useState<DerivedStats | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [stockId, setStockId] = useState<string | null>(null)
-  const [watched, setWatched] = useState(false)
-  const [watching, setWatching] = useState(false)
-  const [watchError, setWatchError] = useState<string | null>(null)
-  const [range, setRange] = useState<'1mo' | '6mo' | '1y' | '5y'>('6mo')
-  const [rangeLoading, setRangeLoading] = useState(false)
-  const [searchInput, setSearchInput] = useState('')
-
   const symbol = decodeURIComponent(params.symbol).toUpperCase()
 
-  useEffect(() => {
-    async function load() {
-      setLoading(true)
-      setError('')
+  const [user, setUser] = useState<User | null>(null)
+  const [profile, setProfile] = useState<StockProfile | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
 
-      // No auth guard: price, chart, statistics, fundamentals and the analyst
-      // view all come from Yahoo, so this page is useful signed out and while
-      // the database is unreachable. The session only decides whether the
-      // watchlist button can be offered.
-      const { user } = await getSessionUser()
+  const [range, setRange] = useState<Range>('1y')
+  const [mode, setMode] = useState<ChartMode>('area')
+  const [overlays, setOverlays] = useState({ ma50: false, ma200: false })
+  const [showTable, setShowTable] = useState(false)
+  const [history, setHistory] = useState<History | null>(null)
+  const [historyLoading, setHistoryLoading] = useState(true)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+
+  const [stockId, setStockId] = useState<string | null>(null)
+  const [watched, setWatched] = useState(false)
+  const [watchBusy, setWatchBusy] = useState(false)
+  const [watchError, setWatchError] = useState<string | null>(null)
+
+  const [peers, setPeers] = useState<Peer[]>([])
+  const [news, setNews] = useState<NewsItem[] | null>(null)
+
+  // Profile, session and watch state for this symbol.
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    setError(null)
+    setSuggestions([])
+    setProfile(null)
+
+    async function load() {
+      const [{ user }, response] = await Promise.all([
+        getSessionUser(),
+        fetch(`/api/stocks/quote?symbol=${encodeURIComponent(symbol)}`).catch(() => null),
+      ])
+      if (!active) return
       setUser(user)
 
-      // Look up whether this symbol exists in the scored universe, so we
-      // know whether "Add to Watchlist" is possible (watchlists FK requires
-      // a real stock_id — this profile page also works for tickers outside
-      // that seeded set, since Yahoo Finance isn't limited to it). Wrapped
-      // because a paused database must not stop the Yahoo data below from
-      // loading.
-      let stockRow: { id: string } | null = null
+      if (!response) {
+        setError('Could not reach the server for this quote.')
+        setLoading(false)
+        return
+      }
+      const data = await response.json().catch(() => ({}))
+      if (!active) return
+      if (!response.ok) {
+        setError(data.error || 'Quote unavailable')
+        setSuggestions(data.suggestions || [])
+        setLoading(false)
+        return
+      }
+
+      const p = data as StockProfile
+      // An old symbol from saved history: move to the one it trades under now.
+      if (p.renamed && p.symbol !== symbol) {
+        router.replace(`/stocks/${encodeURIComponent(p.symbol)}`)
+      }
+      setProfile(p)
+      setLoading(false)
+
       if (user) {
         try {
-          const { data } = await supabase
-            .from('stocks')
-            .select('id')
-            .eq('symbol', symbol)
-            .maybeSingle()
-          stockRow = data
+          const { data: row } = await supabase.from('stocks').select('id').eq('symbol', p.symbol).maybeSingle()
+          if (!active) return
+          setStockId(row?.id ?? null)
+          if (row?.id) {
+            const { data: w } = await supabase
+              .from('watchlists')
+              .select('id')
+              .eq('user_id', user.id)
+              .eq('stock_id', row.id)
+              .maybeSingle()
+            if (active) setWatched(!!w)
+          } else {
+            setWatched(false)
+          }
         } catch {
-          // Leave stockRow null — the watchlist button is simply not offered.
+          // The watch button falls back to creating the row on demand.
         }
-      }
-      if (stockRow && user) {
-        setStockId(stockRow.id)
-        const { data: existingWatch } = await supabase
-          .from('watchlists')
-          .select('id')
-          .eq('user_id', user.id)
-          .eq('stock_id', stockRow.id)
-          .maybeSingle()
-        setWatched(!!existingWatch)
-      } else {
-        setStockId(null)
-      }
-
-      try {
-        const [quoteRes, historyRes] = await Promise.all([
-          fetch(`/api/stocks/quote?symbol=${encodeURIComponent(symbol)}`),
-          fetch(
-            `/api/stocks/history?symbol=${encodeURIComponent(symbol)}` +
-              `&range=${range}&interval=${range === '5y' ? '1wk' : '1d'}`
-          ),
-        ])
-        const quoteData = await quoteRes.json()
-        const historyData = await historyRes.json()
-
-        if (!quoteRes.ok) throw new Error(quoteData.error || 'Failed to fetch quote')
-        if (!historyRes.ok) throw new Error(historyData.error || 'Failed to fetch price history')
-
-        setQuote(quoteData)
-        setHistory(historyData.points || [])
-        setStats(historyData.stats || null)
-      } catch (err: any) {
-        setError(err.message || 'Failed to load live stock data')
-      } finally {
-        setLoading(false)
       }
     }
     load()
-  }, [symbol])
-
-  // Range changes refetch only the series. Reloading the quote as well would
-  // throw away the fundamentals tier for no reason and cost an extra request
-  // against an endpoint we are deliberately easy on.
-  const firstRangeRender = useRef(true)
-  useEffect(() => {
-    if (firstRangeRender.current) {
-      firstRangeRender.current = false
-      return
-    }
-    let active = true
-    setRangeLoading(true)
-    fetch(
-      `/api/stocks/history?symbol=${encodeURIComponent(symbol)}` +
-        `&range=${range}&interval=${range === '5y' ? '1wk' : '1d'}`
-    )
-      .then((r) => r.json())
-      .then((data) => {
-        if (!active || !data?.history) return
-        setHistory(data.history)
-        if (data.stats) setStats(data.stats)
-      })
-      .catch(() => {
-        // Keep the series already on screen rather than blanking the chart.
-      })
-      .finally(() => active && setRangeLoading(false))
     return () => {
       active = false
     }
-  }, [range, symbol])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol])
 
-  async function handleWatch() {
-    if (!user || !stockId || watched) return
-    setWatching(true)
+  // The chart's series. The previous render stays on screen (dimmed) while a
+  // new range loads, so switching ranges never blanks the chart.
+  useEffect(() => {
+    let active = true
+    setHistoryLoading(true)
+    setHistoryError(null)
+    fetch(`/api/stocks/history?symbol=${encodeURIComponent(symbol)}&range=${range}`)
+      .then(async (r) => ({ ok: r.ok, body: await r.json() }))
+      .then(({ ok, body }) => {
+        if (!active) return
+        if (!ok) {
+          setHistoryError(body.error || 'Price history unavailable')
+          return
+        }
+        setHistory({
+          candles: body.candles || [],
+          interval: body.interval,
+          intraday: !!body.intraday,
+          ohlc: body.ohlc !== false,
+          previousClose: body.previousClose ?? null,
+          source: body.source,
+          range,
+        })
+      })
+      .catch(() => active && setHistoryError('Could not reach the server for price history.'))
+      .finally(() => active && setHistoryLoading(false))
+    return () => {
+      active = false
+    }
+  }, [symbol, range])
+
+  // Same-sector constituents, and recent headlines — both secondary, both optional.
+  useEffect(() => {
+    if (!profile) return
+    let active = true
+    if (profile.sector) {
+      fetch('/api/market/equities')
+        .then((r) => (r.ok ? r.json() : { quotes: [] }))
+        .then((data) => {
+          if (!active) return
+          setPeers(
+            (data.quotes || [])
+              .filter((q: Peer) => q.sector === profile.sector && q.symbol !== profile.symbol)
+              .slice(0, 6)
+          )
+        })
+        .catch(() => {})
+    } else {
+      setPeers([])
+    }
+    setNews(null)
+    fetch(`/api/news/company?symbol=${encodeURIComponent(profile.symbol)}&name=${encodeURIComponent(profile.name.replace(/\s*\(.*\)$/, ''))}`)
+      .then((r) => r.json())
+      .then((data) => active && setNews(data.items || []))
+      .catch(() => active && setNews([]))
+    return () => {
+      active = false
+    }
+  }, [profile])
+
+  async function toggleWatch() {
+    if (!profile) return
+    if (!user) {
+      router.push(`/auth/login?next=${encodeURIComponent(`/stocks/${profile.symbol}`)}`)
+      return
+    }
+    setWatchBusy(true)
     setWatchError(null)
-    const { error } = await supabase.from('watchlists').insert({ user_id: user.id, stock_id: stockId })
-    // A swallowed error here is why the button could look like it did nothing:
-    // pressing it repeatedly with no change and no explanation.
-    if (error) setWatchError(error.message)
-    else setWatched(true)
-    setWatching(false)
-  }
-
-  function handleSearch(e: React.FormEvent) {
-    e.preventDefault()
-    if (searchInput.trim()) router.push(`/stocks/${encodeURIComponent(searchInput.trim().toUpperCase())}`)
+    try {
+      let id = stockId
+      if (!id) {
+        const response = await fetch('/api/stocks/ensure', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: profile.symbol }),
+        })
+        const body = await response.json().catch(() => ({}))
+        if (!response.ok || !body.id) throw new Error(body.error || 'Could not add this stock')
+        id = body.id as string
+        setStockId(id)
+      }
+      if (watched) {
+        const { error } = await supabase.from('watchlists').delete().eq('user_id', user.id).eq('stock_id', id)
+        if (error) throw error
+        setWatched(false)
+      } else {
+        const { error } = await supabase.from('watchlists').insert({ user_id: user.id, stock_id: id })
+        if (error && !/duplicate/i.test(error.message)) throw error
+        setWatched(true)
+      }
+    } catch (err: any) {
+      setWatchError(err?.message || 'Watchlist update failed')
+    } finally {
+      setWatchBusy(false)
+    }
   }
 
   const handleLogout = async () => {
@@ -219,324 +309,438 @@ export default function StockProfile({ params }: { params: { symbol: string } })
     router.push('/auth/login')
   }
 
-  const universeEntry = findEquity(symbol)
-  // Where the current price sits between the 52-week low and high, 0-100.
-  const rangePosition =
-    quote?.price != null && quote?.week52Low != null && quote?.week52High != null &&
-    quote.week52High > quote.week52Low
-      ? Math.min(
-          100,
-          Math.max(0, ((quote.price - quote.week52Low) / (quote.week52High - quote.week52Low)) * 100)
-        )
-      : null
+  const period = useMemo(() => {
+    if (!history || history.candles.length < 2) return null
+    const first = history.range === '1d' && history.previousClose ? history.previousClose : history.candles[0].c
+    const last = history.candles[history.candles.length - 1].c
+    return { from: first, to: last, pct: first ? ((last - first) / first) * 100 : 0 }
+  }, [history])
 
-  const upside = quote?.price && quote?.targetMean ? ((quote.targetMean - quote.price) / quote.price) * 100 : null
+  const session = nseSessionState()
+  const up = (profile?.changePct ?? 0) >= 0
+  const canCandle = history?.ohlc !== false
+  const maAvailable = history && !history.intraday
+
+  // Hide overlays that cannot be drawn on this range rather than drawing nothing.
+  const effectiveOverlays = maAvailable ? overlays : { ma50: false, ma200: false }
+
+  const chartRef = useRef<HTMLDivElement>(null)
 
   return (
-    <AppShell userEmail={user?.email} onLogout={handleLogout} showTicker={false}>
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 fade-in">
-        <div>
-          <p className="text-xs font-mono uppercase tracking-widest text-accent-bright mb-2">Live stock profile</p>
-          <h1 className="text-2xl sm:text-3xl font-bold text-ink mb-1">
-            {quote?.name || symbol}
-          </h1>
-          <p className="text-ink-muted text-sm">
-            <span className="font-mono text-accent-bright">{symbol}</span>
-            {universeEntry?.sector ? ` · ${universeEntry.sector}` : ''}
-            {quote?.currency ? ` · ${quote.currency}` : ''}
-            {' · live from Yahoo Finance'}
-          </p>
-        </div>
-        <form onSubmit={handleSearch} className="flex gap-2">
-          <input
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Look up a symbol…"
-            className="w-40 px-3 py-2 bg-surface border border-border rounded-lg text-sm text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent-dim focus:border-accent transition"
-          />
-          <button
-            type="submit"
-            className="bg-accent hover:bg-accent-bright text-on-accent font-semibold px-4 py-2 rounded-lg text-sm transition"
-          >
-            Go
-          </button>
-        </form>
-      </div>
-
-      <div className="flex gap-2 mb-6 overflow-x-auto pb-1">
-        {QUICK_SYMBOLS.map((s) => (
-          <button
-            key={s}
-            onClick={() => router.push(`/stocks/${s}`)}
-            className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium border transition ${
-              s === symbol
-                ? 'bg-accent text-on-accent border-accent'
-                : 'bg-surface text-ink-muted border-border hover:border-border-bright'
-            }`}
-          >
-            {s}
-          </button>
-        ))}
-      </div>
-
-      {error && (
-        <div className="bg-avoid-dim border border-avoid-dim text-avoid px-4 py-3 rounded-lg mb-6 text-sm break-words">
-          {error}
-        </div>
-      )}
+    <AppShell userEmail={user?.email} onLogout={user ? handleLogout : undefined} showTicker={false}>
+      {/* Breadcrumb */}
+      <nav className="flex items-center gap-1.5 text-xs text-ink-faint mb-5" aria-label="Breadcrumb">
+        <Link href="/markets" className="hover:text-ink transition">Markets</Link>
+        <span aria-hidden="true">›</span>
+        {profile?.inNifty50 ? (
+          <>
+            <Link href="/markets" className="hover:text-ink transition">NIFTY 50</Link>
+            <span aria-hidden="true">›</span>
+          </>
+        ) : null}
+        <span className="text-ink-muted">{profile?.symbol ?? symbol}</span>
+      </nav>
 
       {loading ? (
         <div className="space-y-4">
-          <div className="skeleton h-32" />
-          <div className="skeleton h-64" />
           <div className="skeleton h-40" />
+          <div className="grid lg:grid-cols-3 gap-4">
+            <div className="skeleton h-96 lg:col-span-2" />
+            <div className="skeleton h-96" />
+          </div>
         </div>
-      ) : quote ? (
+      ) : error ? (
+        <div className="panel p-10 text-center fade-in">
+          <p className="text-4xl mb-3" aria-hidden="true">🔎</p>
+          <h1 className="text-xl font-bold text-ink mb-2">{error}</h1>
+          {suggestions.length > 0 ? (
+            <>
+              <p className="text-sm text-ink-muted mb-5">Did you mean one of these?</p>
+              <div className="flex flex-wrap justify-center gap-2">
+                {suggestions.map((s) => (
+                  <Link key={s.symbol} href={`/stocks/${encodeURIComponent(s.symbol)}`} className="chip">
+                    <span className="font-mono font-bold text-ink">{s.symbol}</span>
+                    <span className="text-ink-faint">{s.name}</span>
+                  </Link>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-ink-muted">Try the search in the header — it covers every NSE-listed company.</p>
+          )}
+        </div>
+      ) : profile ? (
         <>
-          {/* Price header */}
-          <div className="panel-elevated p-8 mb-6 fade-in">
-            <div className="flex flex-wrap items-end justify-between gap-4">
+          {profile.renamed && (
+            <p className="text-xs text-ink-muted bg-surface-2 border border-border rounded-xl px-4 py-2.5 mb-4">
+              <span className="font-semibold text-ink">{profile.renamed.from}</span> now trades as{' '}
+              <span className="font-semibold text-ink">{profile.renamed.to}</span>. {profile.renamed.note}
+            </p>
+          )}
+
+          {/* ── Header ─────────────────────────────────────────────── */}
+          <section className="panel p-5 sm:p-7 mb-5 fade-in">
+            <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6">
+              <div className="flex items-start gap-4 min-w-0">
+                <CompanyLogo name={profile.name} symbol={profile.symbol} url={profile.logoUrl} />
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <h1 className="text-2xl sm:text-3xl font-bold text-ink tracking-tight">{profile.name}</h1>
+                    {profile.inNifty50 && (
+                      <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded-full border border-accent-dim text-accent">NIFTY 50</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-ink-muted">
+                    <span className="font-mono text-ink">NSE: {profile.symbol}</span>
+                    {profile.industry ? ` · ${profile.industry}` : ''}
+                    {profile.sector && profile.sector !== profile.industry ? ` · ${profile.sector}` : ''}
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                <button onClick={toggleWatch} disabled={watchBusy} className={watched ? 'btn btn-ghost' : 'btn btn-primary'}>
+                  {watchBusy ? 'Saving…' : watched ? '✓ On your watchlist' : user ? '+ Add to watchlist' : 'Sign in to watch'}
+                </button>
+                <Link href={`/analyze?event=${encodeURIComponent(`${profile.name.replace(/\s*\(.*\)$/, '')}: `)}`} className="btn btn-ghost">
+                  ⚡ Analyse an event
+                </Link>
+              </div>
+            </div>
+            {watchError && <p className="text-xs text-avoid mt-3">{watchError}</p>}
+
+            <div className="mt-6 flex flex-col md:flex-row md:items-end gap-6 md:gap-10">
               <div>
-                <p className="text-ink-muted text-sm mb-1">{quote.name || symbol}</p>
-                <p className="mono-tabular text-4xl font-bold text-ink">
-                  {quote.currency === 'INR' ? '₹' : ''}
-                  {quote.price?.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                <p className="text-4xl sm:text-5xl font-bold text-ink tracking-tight">{formatINR(profile.price)}</p>
+                <p className={`mono-tabular text-base font-semibold mt-1 ${up ? 'text-up' : 'text-down'}`}>
+                  {up ? '▲' : '▼'} {profile.change !== null ? formatPrice(Math.abs(profile.change), 2) : '—'} ({formatPct(profile.changePct)}){' '}
+                  <span className="text-ink-faint font-normal text-sm">today</span>
                 </p>
-                <p className={`mono-tabular text-lg font-semibold mt-1 ${(quote.changePct ?? 0) >= 0 ? 'text-buy' : 'text-avoid'}`}>
-                  {(quote.changePct ?? 0) >= 0 ? '+' : ''}
-                  {(quote.changePct ?? 0).toFixed(2)}% today
+                <p className="text-[11px] text-ink-faint mt-1.5 flex items-center gap-1.5">
+                  {session.open && <span className="live-dot" aria-hidden="true" />}
+                  {session.label} · via {SOURCE_NAMES[profile.source] ?? profile.source}
                 </p>
               </div>
-            {watchError && (
-              <p className="text-xs text-avoid mt-2 text-right">Could not watchlist: {watchError}</p>
-            )}
-              {stockId ? (
-                <button
-                  onClick={handleWatch}
-                  disabled={watched || watching}
-                  className={`text-sm font-medium px-4 py-2 rounded-lg border transition ${
-                    watched
-                      ? 'bg-buy-dim text-buy border-buy-dim cursor-default'
-                      : 'bg-surface text-accent-bright border-border hover:border-accent-dim disabled:opacity-50'
-                  }`}
-                >
-                  {watched ? '✓ Watching' : watching ? '…' : '+ Add to Watchlist'}
-                </button>
-              ) : (
-                <p className="text-xs text-ink-faint max-w-[220px] text-right">
-                  This symbol is not in the stock universe. Run database/schema.sql in Supabase to
-                  create and seed it.
-                </p>
-              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 flex-1 max-w-2xl">
+                <RangeBar label="Day range" low={profile.dayLow} high={profile.dayHigh} value={profile.price} />
+                <RangeBar label="52-week range" low={profile.week52Low} high={profile.week52High} value={profile.price} />
+              </div>
             </div>
-          </div>
+            {profile.notes.length > 0 && (
+              <p className="text-[11px] text-hold bg-hold-dim rounded-lg px-3 py-2 mt-5">{profile.notes.join(' · ')}</p>
+            )}
+          </section>
 
-          {/* Price chart */}
-          {history.length > 0 && (
-            <div className="panel p-7 mb-6 fade-in">
+          {/* ── Chart + key statistics ─────────────────────────────── */}
+          <div className="grid lg:grid-cols-3 gap-5 mb-5">
+            <section className="panel p-4 sm:p-6 lg:col-span-2 fade-in" ref={chartRef}>
               <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                <h2 className="text-sm font-bold text-ink">
-                  Price History
-                  {rangeLoading && <span className="text-ink-faint font-normal"> · loading…</span>}
-                </h2>
-                <div className="flex gap-1">
-                  {(['1mo', '6mo', '1y', '5y'] as const).map((r) => (
-                    <button
-                      key={r}
-                      onClick={() => setRange(r)}
-                      className={`text-[11px] font-mono px-2.5 py-1 rounded-md border transition ${
-                        range === r
-                          ? 'bg-accent-dim text-accent-bright border-accent-dim'
-                          : 'bg-surface text-ink-muted border-border hover:border-accent-dim'
-                      }`}
-                    >
-                      {r === '1mo' ? '1M' : r === '6mo' ? '6M' : r === '1y' ? '1Y' : '5Y'}
+                <div className="segmented overflow-x-auto scrollbar-none max-w-full" role="group" aria-label="Chart range">
+                  {RANGES.map((r) => (
+                    <button key={r.id} onClick={() => setRange(r.id)} aria-pressed={range === r.id}>
+                      {r.label}
                     </button>
                   ))}
                 </div>
-              </div>
-              <ResponsiveContainer width="100%" height={280}>
-                <AreaChart data={history} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="priceFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="var(--accent-bright)" stopOpacity={0.35} />
-                      <stop offset="100%" stopColor="var(--accent-bright)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <XAxis
-                    dataKey="date"
-                    tick={{ fontSize: 10, fill: 'var(--text-faint)' }}
-                    tickLine={false}
-                    axisLine={{ stroke: 'var(--border)' }}
-                    minTickGap={40}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 10, fill: 'var(--text-faint)' }}
-                    tickLine={false}
-                    axisLine={false}
-                    domain={['auto', 'auto']}
-                    width={50}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      background: 'var(--surface-2)',
-                      border: '1px solid var(--border-bright)',
-                      borderRadius: 8,
-                      fontSize: 12,
-                    }}
-                    labelStyle={{ color: 'var(--text-muted)' }}
-                    itemStyle={{ color: 'var(--text)' }}
-                  />
-                  <Area type="monotone" dataKey="close" stroke="var(--accent-bright)" strokeWidth={2} fill="url(#priceFill)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-
-          {/* Company overview — what this company is and where the price sits
-              in its own year, before any of the ratio detail below. */}
-          {quote && (
-            <div className="panel p-7 mb-6 fade-in">
-              <h2 className="text-sm font-bold text-ink mb-4">Overview</h2>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
-                <div>
-                  <p className="text-[11px] text-ink-faint uppercase tracking-wide mb-1">Sector</p>
-                  <p className="text-sm text-ink">{universeEntry?.sector ?? '—'}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] text-ink-faint uppercase tracking-wide mb-1">Market cap</p>
-                  <p className="text-sm text-ink mono-tabular">{formatMarketCap(quote.marketCap)}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] text-ink-faint uppercase tracking-wide mb-1">In NIFTY 50</p>
-                  <p className="text-sm text-ink">{universeEntry ? 'Yes' : 'Not in this universe'}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] text-ink-faint uppercase tracking-wide mb-1">Listing</p>
-                  <p className="text-sm text-ink mono-tabular">NSE · {symbol}</p>
-                </div>
-              </div>
-
-              {rangePosition !== null && (
-                <div>
-                  <div className="flex justify-between text-[11px] text-ink-faint mono-tabular mb-1.5">
-                    <span>52-week low ₹{quote.week52Low!.toFixed(2)}</span>
-                    <span>52-week high ₹{quote.week52High!.toFixed(2)}</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="segmented" role="group" aria-label="Chart style">
+                    <button onClick={() => setMode('area')} aria-pressed={mode === 'area' || !canCandle}>Line</button>
+                    <button onClick={() => setMode('candle')} aria-pressed={mode === 'candle' && canCandle} disabled={!canCandle} title={canCandle ? undefined : 'This source gave closing prices only'}>
+                      Candles
+                    </button>
                   </div>
-                  <div className="relative h-2 rounded-full bg-surface-2 border border-border">
-                    <div
-                      className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2.5 h-2.5 rounded-full bg-accent-bright"
-                      style={{ left: `${rangePosition}%` }}
-                      title={`₹${quote.price?.toFixed(2)}`}
-                    />
-                  </div>
-                  <p className="text-[11px] text-ink-muted mt-1.5">
-                    Trading {rangePosition.toFixed(0)}% of the way up its 52-week range.
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Price statistics — derived from the chart series, so these are
-              present whenever the chart is. */}
-          {stats && (
-            <div className="panel p-7 mb-6 fade-in">
-              <h2 className="text-sm font-bold text-ink mb-1">Price Statistics</h2>
-              <p className="text-xs text-ink-faint mb-4">
-                Computed from the 6-month daily close series shown above.
-              </p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                {[
-                  ['6M High', stats.periodHigh?.toLocaleString('en-IN') ?? '—'],
-                  ['6M Low', stats.periodLow?.toLocaleString('en-IN') ?? '—'],
-                  ['6M Change', stats.changePctInPeriod != null ? `${stats.changePctInPeriod >= 0 ? '+' : ''}${stats.changePctInPeriod.toFixed(2)}%` : '—'],
-                  ['50-Day SMA', stats.sma50?.toLocaleString('en-IN') ?? '—'],
-                  ['200-Day SMA', stats.sma200?.toLocaleString('en-IN') ?? '—'],
-                  ['Volatility (ann.)', stats.volatilityPct != null ? `${stats.volatilityPct.toFixed(1)}%` : '—'],
-                ].map(([label, value]) => (
-                  <div key={label} className="border border-border rounded-lg p-4 tile-hover">
-                    <p className="text-[10px] text-ink-faint uppercase tracking-wide mb-1">{label}</p>
-                    <p className="mono-tabular text-lg font-bold text-ink">{value}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Fundamentals */}
-          <div className="panel p-7 mb-6 fade-in">
-            <h2 className="text-sm font-bold text-ink mb-4">Fundamentals</h2>
-            {quote.fundamentalsError && (
-              <p className="text-xs text-hold bg-hold-dim border border-hold-dim rounded-lg px-3 py-2 mb-4">
-                {quote.fundamentalsError}
-              </p>
-            )}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-              {[
-                ['Market Cap', formatMarketCap(quote.marketCap)],
-                ['P/E Ratio', quote.peRatio?.toFixed(1) ?? '—'],
-                ['P/B Ratio', quote.pbRatio?.toFixed(2) ?? '—'],
-                ['Dividend Yield', quote.dividendYield != null ? `${(quote.dividendYield * 100).toFixed(2)}%` : '—'],
-                ['52-Week High', quote.week52High?.toLocaleString() ?? '—'],
-                ['52-Week Low', quote.week52Low?.toLocaleString() ?? '—'],
-              ].map(([label, value]) => (
-                <div key={label} className="border border-border rounded-lg p-4">
-                  <p className="text-[10px] text-ink-faint uppercase tracking-wide mb-1">{label}</p>
-                  <p className="mono-tabular text-lg font-bold text-ink">{value}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Analyst view */}
-          <div className="panel p-7">
-            <h2 className="text-sm font-bold text-ink mb-1">Analyst View</h2>
-            <p className="text-xs text-ink-faint mb-5">
-              Consensus rating and price targets aggregated from sell-side analysts covering this stock, via Yahoo Finance.
-            </p>
-            {quote.analystCount ? (
-              <>
-                <div className="flex flex-wrap items-center gap-3 mb-6">
-                  <span
-                    className={`inline-flex items-center rounded-full font-bold border font-mono tracking-wide text-xs px-2.5 py-1 uppercase ${
-                      RECOMMENDATION_STYLE[quote.analystRecommendationKey || ''] || 'text-ink-faint bg-surface-2 border-border'
-                    }`}
+                  <button
+                    className="chip"
+                    aria-pressed={showTable}
+                    onClick={() => setShowTable((v) => !v)}
+                    title="Show the chart's data as a table"
                   >
-                    {(quote.analystRecommendationKey || 'N/A').replace(/_/g, ' ')}
+                    Table
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-3">
+                {period && (
+                  <p className="text-sm">
+                    <span className={`mono-tabular font-semibold ${period.pct >= 0 ? 'text-up' : 'text-down'}`}>
+                      {period.pct >= 0 ? '▲' : '▼'} {formatPct(period.pct)}
+                    </span>{' '}
+                    <span className="text-ink-faint text-xs">
+                      {range === '1d' ? 'vs previous close' : `over ${RANGES.find((r) => r.id === range)?.label}`} · {formatPrice(period.from)} →{' '}
+                      {formatPrice(period.to)}
+                    </span>
+                  </p>
+                )}
+                {maAvailable && (
+                  <div className="flex items-center gap-2" role="group" aria-label="Moving averages">
+                    {(
+                      [
+                        ['ma50', 'MA 50', 'var(--chart-2)'],
+                        ['ma200', 'MA 200', 'var(--chart-3)'],
+                      ] as const
+                    ).map(([key, label, color]) => (
+                      <button
+                        key={key}
+                        className="chip"
+                        aria-pressed={overlays[key]}
+                        onClick={() => setOverlays((o) => ({ ...o, [key]: !o[key] }))}
+                      >
+                        <span className="inline-block w-3 h-0.5 rounded" style={{ background: color }} aria-hidden="true" />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Legend: only when more than one series is on the chart. */}
+              {(effectiveOverlays.ma50 || effectiveOverlays.ma200) && (
+                <div className="flex items-center gap-4 text-[11px] text-ink-muted mb-2">
+                  <span className="flex items-center gap-1.5">
+                    <span className="inline-block w-3 h-0.5 rounded" style={{ background: 'var(--chart-1)' }} /> Price
                   </span>
-                  <span className="text-ink-muted text-sm">
-                    Based on {quote.analystCount} analyst{quote.analystCount === 1 ? '' : 's'}
-                  </span>
-                  {upside != null && (
-                    <span className={`text-sm font-semibold ${upside >= 0 ? 'text-buy' : 'text-avoid'}`}>
-                      {upside >= 0 ? '+' : ''}
-                      {upside.toFixed(1)}% to mean target
+                  {effectiveOverlays.ma50 && (
+                    <span className="flex items-center gap-1.5">
+                      <span className="inline-block w-3 h-0.5 rounded" style={{ background: 'var(--chart-2)' }} /> 50-bar average
+                    </span>
+                  )}
+                  {effectiveOverlays.ma200 && (
+                    <span className="flex items-center gap-1.5">
+                      <span className="inline-block w-3 h-0.5 rounded" style={{ background: 'var(--chart-3)' }} /> 200-bar average
                     </span>
                   )}
                 </div>
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="border border-border rounded-lg p-4">
-                    <p className="text-[10px] text-ink-faint uppercase tracking-wide mb-1">Target Low</p>
-                    <p className="mono-tabular text-lg font-bold text-ink">{quote.targetLow?.toLocaleString() ?? '—'}</p>
-                  </div>
-                  <div className="border border-accent-dim rounded-lg p-4 bg-accent-dim/20">
-                    <p className="text-[10px] text-accent-bright uppercase tracking-wide mb-1">Target Mean</p>
-                    <p className="mono-tabular text-lg font-bold text-ink">{quote.targetMean?.toLocaleString() ?? '—'}</p>
-                  </div>
-                  <div className="border border-border rounded-lg p-4">
-                    <p className="text-[10px] text-ink-faint uppercase tracking-wide mb-1">Target High</p>
-                    <p className="mono-tabular text-lg font-bold text-ink">{quote.targetHigh?.toLocaleString() ?? '—'}</p>
-                  </div>
+              )}
+
+              {historyError && !history ? (
+                <div className="h-72 flex flex-col items-center justify-center text-center gap-2">
+                  <p className="text-sm text-ink">Chart unavailable right now</p>
+                  <p className="text-xs text-ink-faint max-w-sm">{historyError}</p>
                 </div>
-              </>
-            ) : (
-              <p className="text-ink-faint text-sm">
-                {quote.fundamentalsError
-                  ? 'Analyst data comes from the same Yahoo Finance endpoint as the fundamentals above, which is unavailable right now.'
-                  : 'No analyst coverage data available for this stock.'}
-              </p>
+              ) : !history ? (
+                <div className="skeleton h-80" />
+              ) : showTable ? (
+                <PriceTable candles={history.candles} intraday={history.intraday} range={history.range} />
+              ) : (
+                <PriceChart
+                  candles={history.candles}
+                  range={history.range}
+                  intraday={history.intraday}
+                  mode={canCandle ? mode : 'area'}
+                  previousClose={history.previousClose}
+                  overlays={effectiveOverlays}
+                  loading={historyLoading}
+                  ohlc={history.ohlc}
+                />
+              )}
+              {history && (
+                <p className="text-[10px] text-ink-faint mt-3">
+                  {history.interval} bars · times in IST · via {SOURCE_NAMES[history.source] ?? history.source}
+                  {historyError ? ` · last update failed: ${historyError}` : ''}
+                </p>
+              )}
+            </section>
+
+            <section className="panel p-5 sm:p-6 fade-in">
+              <h2 className="text-sm font-bold text-ink mb-2">Key statistics</h2>
+              <dl>
+                <Stat label="Market cap" value={formatINRCompact(profile.marketCap)} />
+                <Stat label="P/E (TTM)" value={formatRatio(profile.peRatio, 1)} />
+                <Stat label="EPS (TTM)" value={formatINR(profile.eps)} />
+                <Stat label="Price / book" value={formatRatio(profile.pbRatio)} />
+                <Stat label="Dividend yield" value={profile.dividendYieldPct === null ? '—' : formatPct(profile.dividendYieldPct, { signed: false })} />
+                <Stat label="Beta (1Y)" value={formatRatio(profile.beta)} />
+                <Stat label="Open" value={formatPrice(profile.open)} />
+                <Stat label="Previous close" value={formatPrice(profile.previousClose)} />
+                <Stat
+                  label="Volume"
+                  value={formatCount(profile.volume)}
+                  hint={profile.relativeVolume !== null ? `${profile.relativeVolume.toFixed(2)}× the 10-day average` : undefined}
+                />
+                <Stat label="Avg volume (10D)" value={formatCount(profile.avgVolume10d)} />
+              </dl>
+            </section>
+          </div>
+
+          {/* ── Performance + technicals ───────────────────────────── */}
+          <div className="grid lg:grid-cols-3 gap-5 mb-5">
+            <section className="panel p-5 sm:p-6 fade-in">
+              <h2 className="text-sm font-bold text-ink mb-1">Performance</h2>
+              <p className="text-xs text-ink-faint mb-4">Price return over each period.</p>
+              <PerformanceBars
+                rows={[
+                  { label: '1W', value: profile.performance.w1 },
+                  { label: '1M', value: profile.performance.m1 },
+                  { label: '3M', value: profile.performance.m3 },
+                  { label: '6M', value: profile.performance.m6 },
+                  { label: 'YTD', value: profile.performance.ytd },
+                  { label: '1Y', value: profile.performance.y1 },
+                  { label: '5Y', value: profile.performance.y5 },
+                ]}
+              />
+            </section>
+            <section className="panel p-5 sm:p-6 lg:col-span-2 fade-in">
+              <h2 className="text-sm font-bold text-ink mb-4">Technicals</h2>
+              <TechnicalPanel
+                price={profile.price}
+                rsi14={profile.rsi14}
+                sma20={profile.sma20}
+                sma50={profile.sma50}
+                sma200={profile.sma200}
+                macd={profile.macd}
+                macdSignal={profile.macdSignal}
+                adx={profile.adx}
+                rating={profile.technicalRating}
+              />
+            </section>
+          </div>
+
+          {/* ── Financials + company ───────────────────────────────── */}
+          <div className="grid lg:grid-cols-3 gap-5 mb-5">
+            <section className="panel p-5 sm:p-6 lg:col-span-2 fade-in">
+              <h2 className="text-sm font-bold text-ink mb-1">Financials</h2>
+              <p className="text-xs text-ink-faint mb-5">Trailing twelve months, as last reported by the company.</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+                {[
+                  ['Revenue', profile.revenueTtm],
+                  ['Net income', profile.netIncomeTtm],
+                  ['EBITDA', profile.ebitdaTtm],
+                  ['Free cash flow', profile.freeCashFlowTtm],
+                ].map(([label, value]) => (
+                  <div key={label as string} className="rounded-xl border border-border p-3.5">
+                    <p className="stat-label mb-1.5">{label}</p>
+                    <p className="text-lg font-bold text-ink">{formatINRCompact(value as number | null)}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="grid sm:grid-cols-2 gap-x-8 gap-y-6">
+                <div className="space-y-3">
+                  <p className="text-xs font-semibold text-ink">Margins</p>
+                  <MarginBar label="Gross margin" value={profile.grossMarginPct} />
+                  <MarginBar label="Operating margin" value={profile.operatingMarginPct} />
+                  <MarginBar label="Net margin" value={profile.netMarginPct} />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-ink mb-2">Growth, returns and leverage</p>
+                  <dl className="text-xs">
+                    {[
+                      ['Revenue growth (YoY)', <Signed key="r" value={profile.revenueGrowthPct} />],
+                      ['Net income growth (YoY)', <Signed key="n" value={profile.netIncomeGrowthPct} />],
+                      ['EPS growth (YoY)', <Signed key="e" value={profile.epsGrowthPct} />],
+                      ['Return on equity', profile.roePct === null ? '—' : formatPct(profile.roePct, { signed: false })],
+                      ['Return on assets', profile.roaPct === null ? '—' : formatPct(profile.roaPct, { signed: false })],
+                      ['Debt / equity', formatRatio(profile.debtToEquity)],
+                      ['Current ratio', formatRatio(profile.currentRatio)],
+                    ].map(([label, value]) => (
+                      <div key={label as string} className="flex justify-between py-1.5 border-b border-border last:border-b-0">
+                        <dt className="text-ink-muted">{label}</dt>
+                        <dd className="mono-tabular font-semibold text-ink">{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              </div>
+            </section>
+
+            <section className="panel p-5 sm:p-6 fade-in">
+              <h2 className="text-sm font-bold text-ink mb-3">Company</h2>
+              <dl className="text-xs">
+                {[
+                  ['Exchange', `NSE · ${profile.symbol}`],
+                  ['ISIN', profile.isin ?? '—'],
+                  ['Industry', profile.industry ?? '—'],
+                  ['Analysis sector', profile.sector ?? 'Not in the NIFTY 50 universe'],
+                  ['Employees', profile.employees ? profile.employees.toLocaleString('en-IN') : '—'],
+                  ['Shares outstanding', formatCount(profile.sharesOutstanding)],
+                ].map(([label, value]) => (
+                  <div key={label} className="flex justify-between gap-3 py-2 border-b border-border last:border-b-0">
+                    <dt className="text-ink-muted">{label}</dt>
+                    <dd className="text-ink text-right">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <div className="mt-5 rounded-xl border border-accent-dim bg-surface-2 p-4">
+                <p className="stat-label mb-1">Next results</p>
+                {profile.nextEarnings ? (
+                  <>
+                    <p className="text-base font-bold text-ink">{formatDateIST(Date.parse(profile.nextEarnings))}</p>
+                    <p className="text-[11px] text-ink-faint">
+                      {(() => {
+                        const days = Math.ceil((Date.parse(profile.nextEarnings) - Date.now()) / 86_400_000)
+                        return days > 0 ? `in ${days} day${days === 1 ? '' : 's'}` : days === 0 ? 'today' : 'date passed'
+                      })()}
+                      {profile.lastEarnings ? ` · last reported ${formatDateIST(Date.parse(profile.lastEarnings))}` : ''}
+                    </p>
+                    <Link
+                      href={`/analyze?event=${encodeURIComponent(`${profile.name.replace(/\s*\(.*\)$/, '')} quarterly results: `)}`}
+                      className="text-xs text-accent font-semibold hover:underline mt-2 inline-block"
+                    >
+                      Analyse a results scenario →
+                    </Link>
+                  </>
+                ) : (
+                  <p className="text-sm text-ink-muted">No date announced yet.</p>
+                )}
+              </div>
+            </section>
+          </div>
+
+          {/* ── Peers + news ───────────────────────────────────────── */}
+          <div className="grid lg:grid-cols-3 gap-5">
+            {peers.length > 0 && (
+              <section className="panel p-5 sm:p-6 fade-in">
+                <h2 className="text-sm font-bold text-ink mb-1">{profile.sector} peers</h2>
+                <p className="text-xs text-ink-faint mb-3">Other NIFTY 50 companies the analysis engine groups with this one.</p>
+                <ul>
+                  {peers.map((p) => (
+                    <li key={p.symbol}>
+                      <Link
+                        href={`/stocks/${encodeURIComponent(p.symbol)}`}
+                        className="flex items-center gap-3 py-2.5 border-b border-border last:border-b-0 hover:bg-surface-hover -mx-2 px-2 rounded-lg transition"
+                      >
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-sm font-semibold text-ink truncate">{p.name}</span>
+                          <span className="block text-[11px] font-mono text-ink-faint">{p.symbol}</span>
+                        </span>
+                        {p.spark && p.spark.length > 1 && <Sparkline values={p.spark} positive={p.changePct >= 0} width={56} height={22} />}
+                        <span className="text-right">
+                          <span className="block mono-tabular text-sm text-ink">{formatPrice(p.price)}</span>
+                          <span className={`block mono-tabular text-[11px] font-semibold ${p.changePct >= 0 ? 'text-up' : 'text-down'}`}>
+                            {p.changePct >= 0 ? '▲' : '▼'} {formatPct(p.changePct)}
+                          </span>
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
             )}
+            <section className={`panel p-5 sm:p-6 fade-in ${peers.length > 0 ? 'lg:col-span-2' : 'lg:col-span-3'}`}>
+              <h2 className="text-sm font-bold text-ink mb-3">Latest news</h2>
+              {news === null ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="skeleton h-12" />
+                  ))}
+                </div>
+              ) : news.length === 0 ? (
+                <p className="text-sm text-ink-muted">No headlines about {profile.name} in the last week.</p>
+              ) : (
+                <ul>
+                  {news.map((n) => (
+                    <li key={n.url} className="py-2.5 border-b border-border last:border-b-0">
+                      <a href={n.url} target="_blank" rel="noopener noreferrer" className="text-sm text-ink hover:text-accent transition leading-snug">
+                        {n.title}
+                      </a>
+                      <p className="text-[11px] text-ink-faint mt-0.5">
+                        {n.source}
+                        {n.publishedAt ? ` · ${formatRelative(n.publishedAt)}` : ''}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
           </div>
         </>
       ) : null}

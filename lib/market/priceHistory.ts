@@ -54,6 +54,14 @@ interface Plan {
   yahoo: { range: HistoryRange; interval: HistoryInterval } | null
   /** Keep only the last N distinct trading days (intraday ranges). */
   lastDays?: number
+  /**
+   * How to bring the series up to the minute. Historical endpoints stop at
+   * the previous session while the market is open, which left the chart
+   * ending at yesterday's close beside today's live price. Today's bars come
+   * from the intraday endpoint instead: aggregated into one daily bar, or
+   * appended as they are for the 30-minute view.
+   */
+  today?: 'daily' | 'intraday30'
   revalidate: number
 }
 
@@ -98,6 +106,7 @@ function plan(range: ChartRange): Plan {
         groww: (s) => growwCandles(s, 30, daysAgo(12), now, 300),
         yahoo: null,
         lastDays: 5,
+        today: 'intraday30',
         revalidate: 300,
       }
     case '1m':
@@ -139,6 +148,7 @@ function daily(from: Date, to: Date, yahooRange: HistoryRange): Plan {
     moneycontrol: (s) => moneycontrolCandles(s, '1D', from, to, 400, 1800),
     groww: (s) => growwCandles(s, 1440, from, to, 1800),
     yahoo: { range: yahooRange, interval: '1d' },
+    today: 'daily',
     revalidate: 1800,
   }
 }
@@ -146,6 +156,37 @@ function daily(from: Date, to: Date, yahooRange: HistoryRange): Plan {
 /** The calendar date of a bar, in India. */
 function istDate(t: number): string {
   return new Date(t + 5.5 * 3600 * 1000).toISOString().slice(0, 10)
+}
+
+/**
+ * Adds today's session to a historical series when the provider has not yet
+ * included it. Only real bars are added: an aggregate of today's intraday
+ * bars (open of the first, extremes of all, close of the last, summed volume).
+ */
+async function withToday(candles: Candle[], key: string | null, mode: Plan['today']): Promise<Candle[]> {
+  if (!mode || !key || candles.length === 0) return candles
+  let today: Candle[] = []
+  try {
+    today = await upstoxIntraday(key, mode === 'daily' ? 5 : 30, 60)
+  } catch {
+    return candles
+  }
+  if (today.length === 0) return candles
+  const last = candles[candles.length - 1]
+  if (mode === 'intraday30') {
+    return [...candles, ...today.filter((c) => c.t > last.t)]
+  }
+  const todayDate = istDate(today[0].t)
+  if (istDate(last.t) >= todayDate) return candles
+  const bar: Candle = {
+    t: Date.parse(`${todayDate}T00:00:00+05:30`),
+    o: today[0].o,
+    h: Math.max(...today.map((c) => c.h)),
+    l: Math.min(...today.map((c) => c.l)),
+    c: today[today.length - 1].c,
+    v: today.reduce((sum, c) => sum + c.v, 0),
+  }
+  return [...candles, bar]
 }
 
 function keepLastDays(candles: Candle[], days: number): Candle[] {
@@ -189,7 +230,8 @@ export async function fetchPriceHistory(symbol: string, range: ChartRange): Prom
   const attempts: string[] = []
 
   const finish = async (candles: Candle[], source: CandleSource, ohlc = true): Promise<PriceHistory> => {
-    const trimmed = p.lastDays ? keepLastDays(candles, p.lastDays) : candles
+    const current = ohlc ? await withToday(candles, upstox, p.today) : candles
+    const trimmed = p.lastDays ? keepLastDays(current, p.lastDays) : current
     const previousClose = range === '1d' ? await previousSessionClose(upstox, nse ?? symbol, trimmed[0]) : null
     return {
       symbol: symbol.toUpperCase(),

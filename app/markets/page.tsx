@@ -1,12 +1,17 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import Link from 'next/link'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient, getSessionUser } from '@/lib/supabase/client'
 import AppShell from '@/components/layout/AppShell'
 import Sparkline from '@/components/charts/Sparkline'
-import type { User } from '@supabase/supabase-js'
+import MarketTreemap from '@/components/charts/MarketTreemap'
+import HeatLegend from '@/components/charts/HeatLegend'
+import { formatINRCompact, formatPct, formatPrice, nseSessionState } from '@/lib/format'
+import { heatColor, heatInk, heatStep, type HeatScale } from '@/lib/heat'
 import type { MarketQuote } from '@/lib/market/types'
+import type { User } from '@supabase/supabase-js'
 
 interface CryptoCoin {
   symbol: string
@@ -16,70 +21,46 @@ interface CryptoCoin {
   marketCap: number
 }
 
-type Tab = 'equities' | 'india' | 'world' | 'commodities' | 'currencies' | 'crypto'
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'equities', label: 'NIFTY 50 Stocks' },
-  { id: 'india', label: 'India Indices' },
-  { id: 'world', label: 'World Indices' },
-  { id: 'commodities', label: 'Commodities' },
-  { id: 'currencies', label: 'Currencies' },
-  { id: 'crypto', label: 'Crypto' },
-]
-
-/** Human names for the provider ids the API reports. */
-const SOURCE_LABELS: Record<string, string> = {
-  'yahoo-spark': 'Yahoo (batch)',
-  'yahoo-quote': 'Yahoo (quote)',
-  'yahoo-chart': 'Yahoo (chart)',
-  stooq: 'Stooq',
-  frankfurter: 'ECB rates',
-}
-
 interface EquityQuote {
   symbol: string
   name: string
   sector: string
   price: number
   changePct: number
+  marketCap?: number | null
   spark?: number[]
   source?: string
 }
 
-// Heat intensity scales with |change| up to this cap, so a routine ±0.3%
-// index move and a routine ±5% crypto move both read as "mild" rather than
-// crypto tiles being permanently maxed-out red/green.
-// Each asset class has its own idea of a big day: a 2% index move is large,
-// a 2% crypto move is noise. Scaling per tab keeps the colour meaningful
-// instead of leaving crypto permanently saturated.
-const MAX_ABS_PCT: Record<Tab, number> = {
-  equities: 4,
-  india: 2.5,
-  world: 2.5,
-  commodities: 3,
-  currencies: 1.2,
-  crypto: 8,
+type Tab = 'equities' | 'india' | 'world' | 'commodities' | 'currencies' | 'crypto'
+type View = 'heatmap' | 'grid'
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'equities', label: 'NIFTY 50' },
+  { id: 'india', label: 'India indices' },
+  { id: 'world', label: 'World' },
+  { id: 'commodities', label: 'Commodities' },
+  { id: 'currencies', label: 'Currencies' },
+  { id: 'crypto', label: 'Crypto' },
+]
+
+const SCALE: Record<Tab, HeatScale> = {
+  equities: 'equity',
+  india: 'index',
+  world: 'index',
+  commodities: 'commodity',
+  currencies: 'currency',
+  crypto: 'crypto',
 }
 
-function heatStyle(changePct: number, tab: Tab): React.CSSProperties {
-  const alpha = Math.min(Math.abs(changePct) / MAX_ABS_PCT[tab], 1) * 0.42 + 0.06
-  // Reads the live theme tokens so tiles re-tint in light mode instead of
-  // painting dark-mode neon onto a white page.
-  const base = changePct >= 0 ? 'var(--buy)' : 'var(--avoid)'
-  return {
-    background: `color-mix(in srgb, ${base} ${Math.round(alpha * 100)}%, transparent)`,
-    borderColor: `color-mix(in srgb, ${base} ${Math.round(
-      Math.min(alpha + 0.3, 0.9) * 100
-    )}%, transparent)`,
-  }
-}
-
-function formatMarketCap(cap: number): string {
-  if (!cap) return ''
-  if (cap >= 1e12) return `$${(cap / 1e12).toFixed(2)}T`
-  if (cap >= 1e9) return `$${(cap / 1e9).toFixed(2)}B`
-  if (cap >= 1e6) return `$${(cap / 1e6).toFixed(2)}M`
-  return `$${cap.toFixed(0)}`
+const SOURCE_LABELS: Record<string, string> = {
+  tradingview: 'TradingView',
+  upstox: 'Upstox',
+  frankfurter: 'ECB rates',
+  'yahoo-spark': 'Yahoo',
+  'yahoo-quote': 'Yahoo',
+  'yahoo-chart': 'Yahoo',
+  stooq: 'Stooq',
 }
 
 interface Tile {
@@ -89,10 +70,76 @@ interface Tile {
   price: number
   changePct: number
   footnote?: string
-  /** Set for tiles that link somewhere — equities link to their profile. */
   href?: string
-  /** Recent closes, for the tile's own price line. */
   spark?: number[]
+}
+
+function formatUsdCompact(cap: number): string {
+  if (!cap) return ''
+  if (cap >= 1e12) return `$${(cap / 1e12).toFixed(2)}T`
+  if (cap >= 1e9) return `$${(cap / 1e9).toFixed(1)}B`
+  return `$${(cap / 1e6).toFixed(0)}M`
+}
+
+function HeatTile({ tile, scale, index }: { tile: Tile; scale: HeatScale; index: number }) {
+  const step = heatStep(tile.changePct, scale)
+  const Tag = (tile.href ? Link : 'div') as any
+  return (
+    <Tag
+      {...(tile.href ? { href: tile.href } : {})}
+      style={{ background: heatColor(step), color: heatInk(step), animationDelay: `${Math.min(index * 20, 300)}ms` }}
+      className={`fade-in rounded-xl p-3.5 block ${tile.href ? 'tile-hover' : ''}`}
+      aria-label={`${tile.name}, ${formatPrice(tile.price)}, ${tile.changePct >= 0 ? 'up' : 'down'} ${Math.abs(tile.changePct).toFixed(2)}%`}
+    >
+      <p className="font-mono text-[10px] uppercase tracking-wide opacity-70 mb-0.5 truncate">{tile.group}</p>
+      <p className="font-bold text-sm mb-2 truncate" title={tile.name}>
+        {tile.name}
+      </p>
+      <div className="flex items-end justify-between gap-2">
+        <div className="min-w-0">
+          <p className="mono-tabular text-[17px] font-bold leading-tight">{formatPrice(tile.price)}</p>
+          <p className="mono-tabular text-xs font-semibold opacity-90">
+            {tile.changePct >= 0 ? '▲' : '▼'} {formatPct(tile.changePct)}
+          </p>
+        </div>
+        {tile.spark && tile.spark.length > 1 && (
+          <span className="flex-shrink-0 opacity-90">
+            <Sparkline values={tile.spark} positive={tile.changePct >= 0} width={72} height={24} color="currentColor" />
+          </span>
+        )}
+      </div>
+      {tile.footnote && <p className="text-[10px] mt-1.5 font-mono opacity-60 truncate">{tile.footnote}</p>}
+    </Tag>
+  )
+}
+
+function MoverList({ title, items, positive }: { title: string; items: EquityQuote[]; positive: boolean }) {
+  return (
+    <div>
+      <p className="stat-label mb-2">{title}</p>
+      <ul>
+        {items.map((q) => (
+          <li key={q.symbol}>
+            <Link
+              href={`/stocks/${encodeURIComponent(q.symbol)}`}
+              className="flex items-center justify-between gap-3 py-2 border-b border-border last:border-b-0 hover:bg-surface-hover -mx-2 px-2 rounded-lg transition"
+            >
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-ink truncate">{q.name}</span>
+                <span className="block text-[11px] font-mono text-ink-faint">{q.symbol}</span>
+              </span>
+              <span className="text-right flex-shrink-0">
+                <span className="block mono-tabular text-sm text-ink">{formatPrice(q.price)}</span>
+                <span className={`block mono-tabular text-xs font-semibold ${positive ? 'text-up' : 'text-down'}`}>
+                  {q.changePct >= 0 ? '▲' : '▼'} {formatPct(q.changePct)}
+                </span>
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
 }
 
 export default function Markets() {
@@ -106,37 +153,28 @@ export default function Markets() {
   const [failed, setFailed] = useState<string[]>([])
   const [errors, setErrors] = useState<string[]>([])
   const [fetchedAt, setFetchedAt] = useState<string | null>(null)
-  // Set when the upstream rate-limited and the server served its last good
-  // payload instead. Shown rather than hidden: slightly old prices labelled as
-  // old are useful; the same prices passed off as live are not.
   const [staleAgeSeconds, setStaleAgeSeconds] = useState<number | null>(null)
-  // Which upstream actually served the prices on screen. Worth showing: the
-  // app falls back across several, and "which feed answered" has been the
-  // single most useful thing to know when the grid looked wrong.
   const [sources, setSources] = useState<string[]>([])
-  // How many tiles came from memory rather than this refresh. A rate-limited
-  // feed fills the grid gradually, and saying so is better than implying
-  // every tile is a second old.
-  const [remembered, setRemembered] = useState(0)
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>('equities')
+  const [view, setView] = useState<View>('heatmap')
 
   useEffect(() => {
-    let active = true
+    // The tab can be deep-linked (the header search links indices here).
+    const fromUrl = new URLSearchParams(window.location.search).get('tab') as Tab | null
+    if (fromUrl && TABS.some((t) => t.id === fromUrl)) setTab(fromUrl)
+    // A treemap of fifty companies is unreadable on a phone; the grid is not.
+    if (window.innerWidth < 640) setView('grid')
 
+    let active = true
     async function init() {
-      // Deliberately no auth guard: every tab on this page comes from keyless
-      // public feeds, so it stays usable signed out — and, more to the point,
-      // while the database is unreachable. The session lookup is only for the
-      // header's email/logout affordance.
+      // No auth guard: every tab comes from keyless public feeds, so this page
+      // stays usable signed out and while the database is unreachable.
       const { user } = await getSessionUser()
       if (active) setUser(user)
       await load(active)
     }
-
     init()
-    // Same cadence as the market bar. The routes are edge-cached, so this is
-    // cheap regardless of how many tabs are open.
     const interval = setInterval(() => load(active), 60000)
     return () => {
       active = false
@@ -145,9 +183,16 @@ export default function Markets() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  function selectTab(next: Tab) {
+    setTab(next)
+    const url = new URL(window.location.href)
+    if (next === 'equities') url.searchParams.delete('tab')
+    else url.searchParams.set('tab', next)
+    window.history.replaceState(null, '', url.toString())
+  }
+
   async function load(active = true) {
-    // Three independent sources; one being rate-limited must not blank the
-    // others' tabs, so each is settled and reported separately.
+    // Three independent sources; one failing must not blank the others' tabs.
     const [marketRes, equityRes, cryptoRes] = await Promise.allSettled([
       fetch('/api/market/live?scope=full').then(async (r) => ({ ok: r.ok, body: await r.json() })),
       fetch('/api/market/equities').then(async (r) => ({ ok: r.ok, body: await r.json() })),
@@ -157,49 +202,37 @@ export default function Markets() {
 
     const nextErrors: string[] = []
     const nextFailed: string[] = []
+    const nextSources = new Set<string>()
 
     if (marketRes.status === 'fulfilled' && marketRes.value.ok) {
-      setQuotes(marketRes.value.body.quotes || [])
-      nextFailed.push(...(marketRes.value.body.failed || []))
-      setFetchedAt(marketRes.value.body.fetchedAt || null)
-      setStaleAgeSeconds(
-        marketRes.value.body.stale ? marketRes.value.body.staleAgeSeconds ?? null : null
-      )
-      setRemembered(marketRes.value.body.fromMemory ?? 0)
-      setSources(
-        Array.from(
-          new Set(
-            [...(marketRes.value.body.quotes || [])]
-              .map((q: MarketQuote) => q.source)
-              .filter(Boolean) as string[]
-          )
-        )
-      )
+      const body = marketRes.value.body
+      setQuotes(body.quotes || [])
+      nextFailed.push(...(body.failed || []))
+      setFetchedAt(body.fetchedAt || null)
+      setStaleAgeSeconds(body.stale ? body.staleAgeSeconds ?? null : null)
+      for (const q of body.quotes || []) if (q.source) nextSources.add(SOURCE_LABELS[q.source] ?? q.source)
     } else {
-      const reason =
-        marketRes.status === 'fulfilled' ? marketRes.value.body?.error : (marketRes.reason as Error)?.message
-      nextErrors.push(`Indices, commodities & FX: ${reason || 'unavailable'}`)
+      nextErrors.push('Indices, commodities and currencies are unavailable right now.')
     }
 
     if (equityRes.status === 'fulfilled' && equityRes.value.ok) {
-      setEquities(equityRes.value.body.quotes || [])
-      nextFailed.push(...(equityRes.value.body.failed || []))
+      const body = equityRes.value.body
+      setEquities(body.quotes || [])
+      nextFailed.push(...(body.failed || []))
+      for (const q of body.quotes || []) if (q.source) nextSources.add(SOURCE_LABELS[q.source] ?? q.source)
     } else {
-      const reason =
-        equityRes.status === 'fulfilled' ? equityRes.value.body?.error : (equityRes.reason as Error)?.message
-      nextErrors.push(`NIFTY 50 stocks: ${reason || 'unavailable'}`)
+      nextErrors.push('NIFTY 50 quotes are unavailable right now.')
     }
 
     if (cryptoRes.status === 'fulfilled' && cryptoRes.value.ok) {
       setCoins(cryptoRes.value.body.coins || [])
     } else {
-      const reason =
-        cryptoRes.status === 'fulfilled' ? cryptoRes.value.body?.error : (cryptoRes.reason as Error)?.message
-      nextErrors.push(`Crypto: ${reason || 'unavailable'}`)
+      nextErrors.push('Crypto prices are unavailable right now.')
     }
 
     setFailed(nextFailed)
     setErrors(nextErrors)
+    setSources(Array.from(nextSources))
     setLoading(false)
   }
 
@@ -215,7 +248,7 @@ export default function Markets() {
       name: q.name,
       price: q.price,
       changePct: q.changePct,
-      footnote: q.currency,
+      footnote: q.currency || undefined,
       spark: q.spark,
     }))
 
@@ -227,8 +260,8 @@ export default function Markets() {
       name: e.name,
       price: e.price,
       changePct: e.changePct,
-      footnote: e.symbol,
-      href: `/stocks/${e.symbol}`,
+      footnote: `${e.symbol}${e.marketCap ? ` · ${formatINRCompact(e.marketCap)}` : ''}`,
+      href: `/stocks/${encodeURIComponent(e.symbol)}`,
       spark: e.spark,
     }))
 
@@ -244,180 +277,218 @@ export default function Markets() {
       name: c.name,
       price: c.price,
       changePct: c.changePct,
-      footnote: formatMarketCap(c.marketCap),
+      footnote: formatUsdCompact(c.marketCap),
     })),
   }
+  const counts: Record<Tab, number> = {
+    equities: equities.length,
+    india: byTab.india.length,
+    world: byTab.world.length,
+    commodities: byTab.commodities.length,
+    currencies: byTab.currencies.length,
+    crypto: coins.length,
+  }
   const active = byTab[tab]
-
-  // Sector filter chips, only meaningful on the equities tab.
   const equitySectors = ['All', ...Array.from(new Set(equities.map((e) => e.sector))).sort()]
 
-  // A breadth count says more about a session than any single tile.
-  const advancing = active.filter((t) => t.changePct > 0).length
-  const declining = active.filter((t) => t.changePct < 0).length
+  const breadth = useMemo(() => {
+    const up = equities.filter((e) => e.changePct > 0).length
+    const down = equities.filter((e) => e.changePct < 0).length
+    return { up, down, flat: equities.length - up - down }
+  }, [equities])
+
+  const movers = useMemo(() => {
+    const sorted = [...equities].sort((a, b) => b.changePct - a.changePct)
+    return { gainers: sorted.slice(0, 5), losers: sorted.slice(-5).reverse() }
+  }, [equities])
+
+  const headline = ['^NSEI', '^BSESN', '^NSEBANK', '^INDIAVIX']
+    .map((s) => quotes.find((q) => q.symbol === s))
+    .filter((q): q is MarketQuote => !!q)
+
+  const session = nseSessionState()
 
   return (
-    <AppShell userEmail={user?.email} onLogout={handleLogout}>
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 fade-in">
+    <AppShell userEmail={user?.email} onLogout={user ? handleLogout : undefined}>
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6 fade-in">
         <div>
-          <p className="text-xs font-mono uppercase tracking-widest text-accent mb-2">Global markets</p>
-          <h1 className="text-2xl sm:text-3xl font-bold text-ink mb-1">Live Market Heatmap</h1>
-          <p className="text-ink-muted text-sm">
-            Every NIFTY 50 stock, Indian sector indices, the major exchanges of every region,
-            the commodity complex, INR crosses and the top 50 cryptocurrencies — colour-scaled by
-            today&apos;s move. Fetched live from keyless public feeds, refreshed every minute.
+          <p className="eyebrow mb-2">Markets</p>
+          <h1 className="text-3xl sm:text-4xl font-bold text-ink tracking-tight">Live market heatmap</h1>
+          <p className="text-ink-muted text-sm mt-1.5 max-w-2xl">
+            Every NIFTY 50 company sized by market value and coloured by today&apos;s move, plus Indian sector indices,
+            world markets, commodities, currencies and crypto. Refreshed every minute.
           </p>
         </div>
-        <div className="flex flex-col items-start sm:items-end gap-1.5 flex-shrink-0">
-          {fetchedAt && (
-            <span
-              className={`flex items-center gap-2 text-[10px] font-mono ${
-                staleAgeSeconds !== null ? 'text-hold' : 'text-ink-faint'
-              }`}
-              title={
-                staleAgeSeconds !== null
-                  ? 'The upstream feed is rate-limiting. These are the last prices it served.'
-                  : undefined
-              }
-            >
-              {staleAgeSeconds === null && <span className="live-dot" />}
-              {staleAgeSeconds !== null
-                ? `${remembered} tile${remembered === 1 ? '' : 's'} up to ${
-                    staleAgeSeconds < 90
-                      ? `${staleAgeSeconds}s`
-                      : `${Math.round(staleAgeSeconds / 60)}m`
-                  } old`
-                : `Updated ${new Date(fetchedAt).toLocaleTimeString('en-IN', { hour12: false })}`}
-            </span>
+        <div className="flex flex-col items-start md:items-end gap-1 text-[11px] font-mono text-ink-faint flex-shrink-0">
+          <span className="flex items-center gap-2">
+            {session.open && <span className="live-dot" aria-hidden="true" />}
+            {session.label}
+            {fetchedAt &&
+              ` · updated ${new Date(fetchedAt).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false })} IST`}
+          </span>
+          {staleAgeSeconds !== null && (
+            <span className="text-hold">Some tiles are up to {Math.max(1, Math.round(staleAgeSeconds / 60))} min old</span>
           )}
-          {sources.length > 0 && (
-            <span className="text-[10px] font-mono text-ink-faint">
-              via {sources.map((s) => SOURCE_LABELS[s] ?? s).join(' + ')}
-            </span>
-          )}
-          {!loading && active.length > 0 && (
-            <span className="text-[11px] font-mono mono-tabular">
-              <span className="text-buy">{advancing} advancing</span>
-              <span className="text-ink-faint"> · </span>
-              <span className="text-avoid">{declining} declining</span>
-            </span>
-          )}
+          {sources.length > 0 && <span>via {sources.join(' + ')}</span>}
         </div>
       </div>
 
+      {/* Headline indices */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        {loading && headline.length === 0
+          ? Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton h-[92px]" />)
+          : headline.map((q) => {
+              const upMove = q.changePct >= 0
+              return (
+                <div key={q.symbol} className="panel p-4 fade-in">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="stat-label truncate">{q.name}</p>
+                      <p className="text-xl font-bold text-ink mt-1">{formatPrice(q.price)}</p>
+                      <p className={`mono-tabular text-xs font-semibold ${upMove ? 'text-up' : 'text-down'}`}>
+                        {upMove ? '▲' : '▼'} {formatPrice(Math.abs(q.change), 2)} ({formatPct(q.changePct)})
+                      </p>
+                    </div>
+                    {q.spark && q.spark.length > 1 && (
+                      <span className="hidden sm:block">
+                        <Sparkline values={q.spark} positive={upMove} width={84} height={34} />
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+      </div>
+
       {errors.map((message) => (
-        <p
-          key={message}
-          className="text-sm text-avoid bg-avoid-dim border border-avoid-dim rounded-lg px-3 py-2 mb-3"
-        >
-          {message}
+        <p key={message} className="text-sm text-avoid bg-avoid-dim border border-avoid-dim rounded-xl px-4 py-2.5 mb-3">
+          {message} It retries automatically every minute.
         </p>
       ))}
 
-      {failed.length > 0 && (
-        <p className="text-xs text-ink-faint font-mono mb-4">
-          No data for: {failed.join(', ')}
-        </p>
-      )}
-
-      <div className="flex gap-2 mb-6 overflow-x-auto pb-1">
+      <div className="flex gap-2 mb-5 overflow-x-auto pb-1 scrollbar-none" role="tablist" aria-label="Market">
         {TABS.map((t) => (
           <button
             key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium border transition ${
-              tab === t.id
-                ? 'bg-accent text-on-accent border-accent shadow-glow'
-                : 'bg-surface text-ink-muted border-border hover:border-accent-dim'
-            }`}
+            role="tab"
+            aria-selected={tab === t.id}
+            onClick={() => selectTab(t.id)}
+            className={`chip !text-[13px] !px-4 !py-1.5 ${tab === t.id ? 'chip-active' : ''}`}
           >
-            {t.label} ({byTab[t.id].length})
+            {t.label}
+            <span className={`text-[10px] font-mono ${tab === t.id ? 'opacity-80' : 'text-ink-faint'}`}>{counts[t.id]}</span>
           </button>
         ))}
       </div>
 
-      {tab === 'equities' && equitySectors.length > 1 && (
-        <div className="flex gap-2 mb-6 overflow-x-auto pb-1">
-          {equitySectors.map((sector) => (
-            <button
-              key={sector}
-              onClick={() => setSectorFilter(sector)}
-              className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition ${
-                sectorFilter === sector
-                  ? 'bg-surface-2 text-accent border-accent-dim'
-                  : 'bg-surface text-ink-muted border-border hover:border-accent-dim'
-              }`}
-            >
-              {sector}
-            </button>
-          ))}
-        </div>
-      )}
+      {tab === 'equities' ? (
+        <div className="grid xl:grid-cols-[1fr_300px] gap-5">
+          <section className="panel p-4 sm:p-5 min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div className="segmented" role="group" aria-label="View">
+                <button onClick={() => setView('heatmap')} aria-pressed={view === 'heatmap'}>
+                  Heatmap
+                </button>
+                <button onClick={() => setView('grid')} aria-pressed={view === 'grid'}>
+                  Grid
+                </button>
+              </div>
+              <HeatLegend scale="equity" />
+            </div>
 
-      {loading ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="skeleton h-28" />
-          ))}
-        </div>
-      ) : active.length === 0 ? (
-        <div className="panel p-10 text-center text-ink-muted">
-          <p className="text-lg mb-2 text-ink">No data for this tab right now</p>
-          <p className="text-sm">
-            The upstream feed is rate-limiting or unreachable. It refreshes automatically every
-            minute — no key or manual refresh needed.
-          </p>
+            {equities.length > 0 && (
+              <div className="mb-4">
+                <div className="flex justify-between text-[11px] font-mono mb-1.5">
+                  <span className="text-up">▲ {breadth.up} advancing</span>
+                  {breadth.flat > 0 && <span className="text-ink-faint">{breadth.flat} unchanged</span>}
+                  <span className="text-down">{breadth.down} declining ▼</span>
+                </div>
+                <div
+                  className="flex h-2 rounded-full overflow-hidden gap-[2px]"
+                  role="img"
+                  aria-label={`${breadth.up} advancing, ${breadth.down} declining`}
+                >
+                  <div style={{ flex: breadth.up, background: 'var(--buy)' }} />
+                  {breadth.flat > 0 && <div style={{ flex: breadth.flat, background: 'var(--text-faint)' }} />}
+                  <div style={{ flex: breadth.down, background: 'var(--avoid)' }} />
+                </div>
+              </div>
+            )}
+
+            {loading ? (
+              <div className="skeleton h-[480px]" />
+            ) : equities.length === 0 ? (
+              <div className="py-16 text-center text-ink-muted">
+                <p className="text-ink mb-1">No NIFTY 50 quotes right now</p>
+                <p className="text-sm">Every provider was tried; this page retries every minute.</p>
+              </div>
+            ) : view === 'heatmap' ? (
+              <MarketTreemap stocks={equities} />
+            ) : (
+              <>
+                <div className="flex gap-2 mb-4 overflow-x-auto pb-1 scrollbar-none">
+                  {equitySectors.map((sector) => (
+                    <button
+                      key={sector}
+                      onClick={() => setSectorFilter(sector)}
+                      className={`chip ${sectorFilter === sector ? 'chip-active' : ''}`}
+                    >
+                      {sector}
+                    </button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
+                  {equityTiles.map((tile, i) => (
+                    <HeatTile key={tile.key} tile={tile} scale="equity" index={i} />
+                  ))}
+                </div>
+              </>
+            )}
+            {failed.length > 0 && (
+              <details className="mt-3 text-[11px] text-ink-faint">
+                <summary className="cursor-pointer">
+                  {failed.length} instrument{failed.length === 1 ? '' : 's'} unavailable right now
+                </summary>
+                <p className="font-mono mt-1">{failed.join(', ')}</p>
+              </details>
+            )}
+          </section>
+
+          <aside className="panel p-4 sm:p-5 space-y-6">
+            <MoverList title="Top gainers" items={movers.gainers} positive />
+            <MoverList title="Top losers" items={movers.losers} positive={false} />
+          </aside>
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {active.map((tile, idx) => {
-            // Equity tiles are links to the stock's own page; index and
-            // commodity tiles have nowhere more specific to go.
-            const Tag = (tile.href ? 'a' : 'div') as any
-            return (
-            <Tag
-              key={tile.key}
-              {...(tile.href ? { href: tile.href } : {})}
-              style={{ ...heatStyle(tile.changePct, tab), animationDelay: `${Math.min(idx * 30, 300)}ms` }}
-              className="tile-hover fade-in rounded-xl border p-4 block"
-            >
-              <p className="font-mono text-[10px] uppercase tracking-wide text-ink-faint mb-1">
-                {tile.group}
-              </p>
-              <p className="font-bold text-ink text-sm mb-2 truncate" title={tile.name}>
-                {tile.name}
-              </p>
-              <div className="flex items-end justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="mono-tabular text-lg font-bold text-ink leading-tight">
-                    {tile.price.toLocaleString('en-IN', {
-                      minimumFractionDigits: tile.price < 10 ? 4 : 2,
-                      maximumFractionDigits: tile.price < 10 ? 4 : 2,
-                    })}
-                  </p>
-                  <p
-                    className={`mono-tabular text-sm font-semibold ${
-                      tile.changePct >= 0 ? 'text-buy' : 'text-avoid'
-                    }`}
-                  >
-                    {tile.changePct >= 0 ? '▲' : '▼'} {Math.abs(tile.changePct).toFixed(2)}%
-                  </p>
-                </div>
-                {tile.spark && tile.spark.length > 1 && (
-                  <Sparkline
-                    values={tile.spark}
-                    positive={tile.changePct >= 0}
-                    className="flex-shrink-0 opacity-90"
-                  />
-                )}
-              </div>
-              {tile.footnote && (
-                <p className="text-[10px] text-ink-faint mt-1.5 font-mono">{tile.footnote}</p>
-              )}
-            </Tag>
-            )
-          })}
-        </div>
+        <section className="panel p-4 sm:p-5">
+          <div className="flex justify-end mb-4">
+            <HeatLegend scale={SCALE[tab]} />
+          </div>
+          {loading ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="skeleton h-28" />
+              ))}
+            </div>
+          ) : active.length === 0 ? (
+            <div className="py-16 text-center text-ink-muted">
+              <p className="text-ink mb-1">No data for this market right now</p>
+              <p className="text-sm">It refreshes automatically every minute.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
+              {active.map((tile, i) => (
+                <HeatTile key={tile.key} tile={tile} scale={SCALE[tab]} index={i} />
+              ))}
+            </div>
+          )}
+          {tab !== 'crypto' && failed.length > 0 && (
+            <details className="mt-3 text-[11px] text-ink-faint">
+              <summary className="cursor-pointer">Some instruments are unavailable right now</summary>
+              <p className="font-mono mt-1">{failed.join(', ')}</p>
+            </details>
+          )}
+        </section>
       )}
     </AppShell>
   )

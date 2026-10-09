@@ -12,6 +12,7 @@ export default function Sparkline({
   width = 88,
   height = 26,
   className = '',
+  color,
 }: {
   values: number[]
   /** Drives the stroke colour; usually the tile's own day change. */
@@ -19,6 +20,8 @@ export default function Sparkline({
   width?: number
   height?: number
   className?: string
+  /** Overrides the up/down colour — on a heat-coloured tile, the tile's own ink. */
+  color?: string
 }) {
   // Two points is the minimum that makes a line; one would draw a dot that
   // looks like a flat session, which is a different claim.
@@ -35,8 +38,8 @@ export default function Sparkline({
 
   const line = values.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(2)},${y(v).toFixed(2)}`).join(' ')
   const area = `${line} L${width},${height} L0,${height} Z`
-  const stroke = positive ? 'var(--buy)' : 'var(--avoid)'
-  const gradientId = `spark-${positive ? 'up' : 'down'}`
+  const stroke = color ?? (positive ? 'var(--buy)' : 'var(--avoid)')
+  const gradientId = `spark-${color ? 'ink' : positive ? 'up' : 'down'}`
 
   return (
     <svg
