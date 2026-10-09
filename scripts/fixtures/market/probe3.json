@@ -1,0 +1,179 @@
+{
+ "search": {
+  "nifty auto": [
+   "NSE:CNXAUTO (Nifty Auto Index)",
+   "NSE:NIFTY_EV (Nifty EV & New Age Automotive Index)",
+   "NSE:NIFTY (Nifty 50 Index)",
+   "NSE:BANKNIFTY (Nifty Bank Index)",
+   "NSE:CNX500 (Nifty 500 Index)",
+   "NSE:CNXIT (Nifty IT Index)"
+  ],
+  "nifty pharma": [
+   "NSE:CNXPHARMA (Nifty Pharma Index)",
+   "NSE:NIFTY (Nifty 50 Index)",
+   "NSE:BANKNIFTY (Nifty Bank Index)",
+   "NSE:CNX500 (Nifty 500 Index)",
+   "NSE:CNXIT (Nifty IT Index)",
+   "NSE:CNXSMALLCAP (Nifty SmallCap 100 Index)"
+  ],
+  "nifty fmcg": [
+   "NSE:CNXFMCG (Nifty FMCG Index)",
+   "SPARKS:FMCGS (FMCG stocks: Consumer goods investments)",
+   "NSE:NIFTY (Nifty 50 Index)",
+   "NSE:BANKNIFTY (Nifty Bank Index)",
+   "NSE:CNX500 (Nifty 500 Index)",
+   "NSE:CNXIT (Nifty IT Index)"
+  ],
+  "nifty metal": [
+   "NSE:CNXMETAL (Nifty Metal Index)",
+   "NSE:NIFTY (Nifty 50 Index)",
+   "NSE:BANKNIFTY (Nifty Bank Index)",
+   "NSE:CNX500 (Nifty 500 Index)",
+   "NSE:CNXIT (Nifty IT Index)",
+   "NSE:CNXSMALLCAP (Nifty SmallCap 100 Index)"
+  ],
+  "nifty realty": [
+   "NSE:CNXREALTY (Nifty Realty Index)",
+   "NSE:NIFTY_REITS_REALTY (NIFTY REITS REALTY)",
+   "NSE:NIFTY (Nifty 50 Index)",
+   "NSE:BANKNIFTY (Nifty Bank Index)",
+   "BSE:REALTY (BSE Realty Index)",
+   "NSE:CNX500 (Nifty 500 Index)"
+  ],
+  "nifty infra": [
+   "NSE:CNXINFRA (Nifty Infrastructure Index)",
+   "NSE:NIFTY_INFRALOG (Nifty India Infrastructure & Logistics Index)",
+   "NSE:NIFTY_MULTI_INFRA (Nifty 500 Multicap Infrastructure 50:30:20 Index)",
+   "NSE:NIFTY (Nifty 50 Index)",
+   "NSE:BANKNIFTY (Nifty Bank Index)",
+   "NSE:CNX500 (Nifty 500 Index)"
+  ],
+  "nifty psu bank": [
+   "NSE:CNXPSUBANK (Nifty PSU Bank Index)",
+   "NSE:NIFTY_RAILWAYSPSU (Nifty India Railways PSU Index)",
+   "BSE:PSUBNK (BSE PSU Bank Index)",
+   "NSE:BANKNIFTY (Nifty Bank Index)",
+   "NSE:NIFTYPVTBANK (Nifty Private Bank Index)",
+   "NSE:NIFTY (Nifty 50 Index)"
+  ],
+  "nifty media": [
+   "NSE:CNXMEDIA (Nifty Media Index)",
+   "NSE:NIFTY (Nifty 50 Index)",
+   "NSE:BANKNIFTY (Nifty Bank Index)",
+   "NSE:CNX500 (Nifty 500 Index)",
+   "NSE:CNXIT (Nifty IT Index)",
+   "NSE:CNXSMALLCAP (Nifty SmallCap 100 Index)"
+  ],
+  "nifty midcap 50": [
+   "NSE:NIFTYMIDCAP50 (Nifty MidCap 50 Index)",
+   "NSE:NIFTYM150MOMNTM50 (Nifty MidCap 150 Momentum 50 Index)",
+   "NSE:NIFTY_M150_QLTY50 (Nifty MidCap 150 Quality 50 Index)",
+   "NSE:NIFTY_MID_SELECT (Nifty MidCap Select Index)",
+   "NSE:CNXMIDCAP (Nifty MidCap 100 Index)",
+   "NSE:NIFTYMIDCAP150 (Nifty MidCap 150 Index)"
+  ],
+  "nifty private bank": [
+   "NSE:NIFTYPVTBANK (Nifty Private Bank Index)",
+   "NSE:BANKNIFTY (Nifty Bank Index)",
+   "NSE:CNXPSUBANK (Nifty PSU Bank Index)",
+   "BSE:BSEPBI (BSE Private Banks Index)",
+   "BSE:BSEMSP (BSE MIDSMALL PRIVATE BANKS)",
+   "NSE:NIFTY (Nifty 50 Index)"
+  ],
+  "nifty healthcare": [
+   "NSE:NIFTY_HEALTHCARE (Nifty Healthcare Index)",
+   "NSE:NIFTY500_HEALTH (Nifty 500 Healthcare Index)",
+   "NSE:NIFTY_MIDSML_HLTH (Nifty MidSmall Healthcare Index)",
+   "NSE:NIFTY (Nifty 50 Index)",
+   "NSE:BANKNIFTY (Nifty Bank Index)",
+   "NSE:CNX500 (Nifty 500 Index)"
+  ],
+  "nifty oil": [
+   "NSE:NIFTY_OIL_AND_GAS (Nifty Oil & Gas Index)",
+   "NSE:NIFTY (Nifty 50 Index)",
+   "NSE:BANKNIFTY (Nifty Bank Index)",
+   "NSE:CNX500 (Nifty 500 Index)",
+   "NSE:CNXIT (Nifty IT Index)",
+   "NSE:CNXSMALLCAP (Nifty SmallCap 100 Index)"
+  ],
+  "nifty consumption": [
+   "NSE:CNXCONSUMPTION (Nifty India Consumption Index)",
+   "NSE:NIFTY_NEW_CONSUMP (Nifty India New Age Consumption Index)",
+   "NSE:NIFTY_MS_IND_CONS (Nifty MidSmall India Consumption Index)",
+   "SSE:931480 (CSI Online Consumption Index)",
+   "SSE:000147 (SSE Select Consumption Industries Index)",
+   "SSE:931481 (CSI SH-HK-SZ Online Consumption Index)"
+  ],
+  "taiex": [
+   "INDEX:TAIEX (TSEC WEIGHTED INDEX)",
+   "THINKMARKETS:TAIEX (FTSE Taiwan RIC Capped Index)",
+   "TWSE:IX0039 (TAIEX FINANCE SUBINDEX)",
+   "TWSE:IX0020 (TAIEX CHEMICAL SUBINDEX)",
+   "TWSE:IX0042 (TAIEX OTHERS SUBINDEX)",
+   "TWSE:IX0011 (TAIEX FOODS SUBINDEX)"
+  ],
+  "asx 200": [
+   "SP:XRI (S&P ASX 200 DEC TR)",
+   "SP:XFE (S&P ASX 200 AONIA ER)",
+   "SP:XNI (S&P ASX 200 DEC NTR)",
+   "SP:XFN (S&P ASX 200 AONIA TR)",
+   "SP:XFR (S&P ASX 200 AONIA DEC)",
+   "SP:XJS (S&P ASX 200 EX 100 TR)"
+  ],
+  "klci": [
+   "FTSEMYX:FBMKLCI (FBM KLCI)",
+   "INDEX:KLSE (FTSE BURSA MALAYSIA KLCI INDEX)",
+   "FTSE:FBMKLCI (FTSE Bursa Malaysia KLCI)",
+   "FTSE:FTKLPS1X (FTSE Bursa Malaysia KLCI Daily Short (Price) Index)",
+   "FTSE:FTKLPL2X (FTSE Bursa Malaysia KLCI 2x Daily Leveraged (Price) Index)"
+  ],
+  "nifty 500": [
+   "NSE:CNX500 (Nifty 500 Index)",
+   "NSE:NIFTY500_EW (Nifty 500 Equal Weight Index)",
+   "NSE:NIFTY500_VALUE_50 (Nifty 500 Value 50 Index)",
+   "NSE:NIFTY500_SHARIAH (Nifty 500 Shariah Index)",
+   "NSE:NIFTY500MOMENTM50 (Nifty 500 Momentum 50 Index)",
+   "NSE:NIFTY500_HEALTH (Nifty 500 Healthcare Index)"
+  ]
+ },
+ "scanner": {
+  "NSE:BAJAJ_AUTO": "global: Bajaj Auto Limited 9926 3.00",
+  "NSE:M&M": "global: Mahindra & Mahindra Ltd. 2813.2 2.25",
+  "NSE:NIFTY_MID_SELECT": "global: Nifty MidCap Select Index 13570.55 1.37",
+  "NSE:CNX500": "global: Nifty 500 Index 21852.2 1.09",
+  "NSE:NIFTY": "global: Nifty 50 Index 22505.9 1.23",
+  "NSE:BANKNIFTY": "global: Nifty Bank Index 55161.9 1.19",
+  "NSE:CNXIT": "global: Nifty IT Index 28700.1 3.47",
+  "NSE:CNXSMALLCAP": "global: Nifty SmallCap 100 Index 19134.75 0.44",
+  "NSE:CNXMIDCAP": "global: Nifty MidCap 100 Index 58687.1 1.39",
+  "TWSE:IX0001": "global: TSEC CAPITALIZATION WEIGHTED STOCK INDEX 49313.44 -0.99",
+  "TWSE:IX0039": "global: TAIEX FINANCE SUBINDEX 3535.27 -1.68",
+  "FTSEMYX:FBMKLCI": "global: FBM KLCI 1607.09 0.38"
+ },
+ "upstox": {
+  "NSE_INDEX|Nifty Auto": true,
+  "NSE_INDEX|Nifty Pharma": true,
+  "NSE_INDEX|Nifty FMCG": true,
+  "NSE_INDEX|Nifty Metal": true,
+  "NSE_INDEX|Nifty Realty": true,
+  "NSE_INDEX|Nifty Infra": true,
+  "NSE_INDEX|Nifty PSU Bank": true,
+  "NSE_INDEX|Nifty Media": true,
+  "NSE_INDEX|Nifty Energy": true,
+  "NSE_INDEX|Nifty Fin Service": true,
+  "NSE_INDEX|Nifty Midcap 50": true,
+  "NSE_INDEX|NIFTY MIDCAP 100": true,
+  "NSE_INDEX|Nifty Next 50": true,
+  "NSE_INDEX|Nifty Pvt Bank": true,
+  "NSE_INDEX|NIFTY HEALTHCARE": true,
+  "NSE_INDEX|Nifty Healthcare Index": false,
+  "NSE_INDEX|NIFTY OIL AND GAS": true,
+  "NSE_INDEX|Nifty Consumption": true,
+  "NSE_INDEX|Nifty 500": true,
+  "NSE_INDEX|Nifty 100": true,
+  "NSE_INDEX|NIFTY SMLCAP 100": true,
+  "NSE_INDEX|Nifty Smallcap 100": false,
+  "NSE_INDEX|Nifty CPSE": true,
+  "NSE_INDEX|Nifty Commodities": true
+ }
+}
