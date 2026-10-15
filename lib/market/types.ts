@@ -2,6 +2,13 @@
 
 export type QuoteCategory = 'domestic' | 'international' | 'commodity' | 'currency'
 
+export const CATEGORY_LABELS: Record<QuoteCategory, string> = {
+  domestic: 'India',
+  international: 'Global',
+  commodity: 'Commodities',
+  currency: 'Currencies',
+}
+
 export type QuoteSource =
   | 'tradingview'
   | 'upstox'

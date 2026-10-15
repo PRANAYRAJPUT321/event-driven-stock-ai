@@ -17,43 +17,12 @@ export interface HistoricalReactionSummary {
   sampleEvents: string[]
 }
 
-/**
- * Finds historical events matching the same event_type + economic_variable + direction
- * (optionally scoped to a sector) and averages their measured market reactions.
- * This is the deterministic "historical evidence" the platform cites instead of
- * letting the AI invent a number (spec section 11 + 19).
- */
-export async function getHistoricalReaction(
-  supabase: SupabaseClient,
-  eventType: string,
-  economicVariable: string,
-  direction: string,
-  sector?: string
-): Promise<HistoricalReactionSummary | null> {
-  let query = supabase
-    .from('historical_event_reactions')
-    .select('*')
-    .eq('event_type', eventType)
-    .eq('economic_variable', economicVariable)
-    .eq('direction', direction)
-
-  if (sector) {
-    query = query.eq('sector', sector)
-  }
-
-  const { data, error } = await query
-
-  if (error || !data || data.length === 0) {
-    return null
-  }
-
+function summarise(rows: any[]): HistoricalReactionSummary {
   const avg = (key: string) =>
-    Number(
-      (data.reduce((sum: number, row: any) => sum + (row[key] || 0), 0) / data.length).toFixed(2)
-    )
+    Number((rows.reduce((sum: number, row: any) => sum + (row[key] || 0), 0) / rows.length).toFixed(2))
 
   return {
-    matchCount: data.length,
+    matchCount: rows.length,
     avgNiftyReturn: {
       d1: avg('nifty_return_1d'),
       d3: avg('nifty_return_3d'),
@@ -66,28 +35,56 @@ export async function getHistoricalReaction(
       d5: avg('sector_return_5d'),
       d20: avg('sector_return_20d'),
     },
-    sampleEvents: data.map((row: any) => row.event_label),
+    sampleEvents: rows.map((row: any) => row.event_label),
   }
 }
 
 /**
- * Converts an average historical return magnitude into a 0-100 score component
- * for the composite score's "historical reaction" factor.
+ * Finds historical events matching the same event_type + economic_variable +
+ * direction and averages their measured market reactions, separately for each
+ * sector the reference set covers. This is the deterministic "historical
+ * evidence" the platform cites instead of letting the AI invent a number
+ * (spec section 11 + 19).
+ *
+ * Grouped by sector because one event moves sectors in opposite directions:
+ * the airline average after past crude spikes says nothing about how upstream
+ * producers fared, and applying it to them is worse than having no evidence.
+ * A sector with no matching rows is simply absent from the map.
  */
-export function historicalReturnToScore(
-  avgReturn5d: number,
-  direction: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL'
-): number {
-  // A positive event with a positive historical return is confirmatory (higher score).
-  // A negative event with a negative historical return is also confirmatory
-  // (the market reliably reacts negatively, which is itself useful signal — but for
-  // opportunity scoring on the recommended side, we score how much the return supports
-  // the stated direction).
-  const magnitude = Math.min(Math.abs(avgReturn5d) * 10, 50) // cap contribution
-  const supportsDirection =
-    (direction === 'POSITIVE' && avgReturn5d > 0) ||
-    (direction === 'NEGATIVE' && avgReturn5d < 0)
+export async function getHistoricalReactions(
+  supabase: SupabaseClient,
+  eventType: string,
+  economicVariable: string,
+  direction: string
+): Promise<Map<string, HistoricalReactionSummary>> {
+  const bySector = new Map<string, HistoricalReactionSummary>()
+  const { data, error } = await supabase
+    .from('historical_event_reactions')
+    .select('*')
+    .eq('event_type', eventType)
+    .eq('economic_variable', economicVariable)
+    .eq('direction', direction)
 
-  const base = 50
-  return Math.round(supportsDirection ? base + magnitude : base - magnitude)
+  if (error || !data || data.length === 0) return bySector
+
+  const groups = new Map<string, any[]>()
+  for (const row of data) {
+    if (!row.sector) continue
+    groups.set(row.sector, [...(groups.get(row.sector) ?? []), row])
+  }
+  for (const [sector, rows] of Array.from(groups)) bySector.set(sector, summarise(rows))
+  return bySector
+}
+
+/**
+ * Converts a sector's average 5-day return after similar past events into the
+ * 0-100 "historical reaction" factor: 50 is no reaction, and each percentage
+ * point of average move is worth 10 points, capped at the ends of the scale.
+ *
+ * This used to score how well the history "supported the event's direction",
+ * which made a negative event whose sector reliably fell afterwards score
+ * *higher* — the opposite of what an opportunity score should say about it.
+ */
+export function historicalReturnToScore(avgReturn5d: number): number {
+  return Math.round(50 + Math.max(-50, Math.min(50, avgReturn5d * 10)))
 }

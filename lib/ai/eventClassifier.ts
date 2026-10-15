@@ -164,6 +164,14 @@ export interface DecisionInput {
   technicalScore: number | null
   riskScore: number | null
   historicalSummary?: string
+  /**
+   * How the event reaches this company specifically, from its sector's side of
+   * the transmission channel. eventDirection is this company's net read, which
+   * can be the opposite of the event's market-wide direction: a crude spike is
+   * a headwind for the market and a tailwind for an upstream producer.
+   */
+  eventPositives?: string[]
+  eventNegatives?: string[]
 }
 
 export interface DecisionOutput {
@@ -194,7 +202,9 @@ returns — refer to the scores given.
 
 Event summary: ${input.eventReasoning}
 Transmission mechanism: ${input.transmissionExplanation}
-Event direction: ${input.eventDirection} (magnitude ${input.eventMagnitude}/100)
+Event direction for this company: ${input.eventDirection} (magnitude ${input.eventMagnitude}/100)
+${input.eventPositives?.length ? `How the event helps this company: ${input.eventPositives.join(' ')}` : ''}
+${input.eventNegatives?.length ? `How the event hurts this company: ${input.eventNegatives.join(' ')}` : ''}
 
 Stock: ${input.stockSymbol}
 Composite Event Opportunity Score: ${input.compositeScore}/100

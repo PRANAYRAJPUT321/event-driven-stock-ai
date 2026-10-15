@@ -96,6 +96,9 @@ checkThat('every ISIN matches the official file',
   equities.NIFTY_50.every((c) => official.find((o) => o.symbol === c.symbol)?.isin === c.isin))
 checkThat('no departed constituent remains', !equities.NIFTY_50.some((c) => ['TATAMOTORS', 'LTIM', 'BPCL', 'BRITANNIA', 'INDUSINDBK', 'HEROMOTOCO', 'WIPRO'].includes(c.symbol)))
 check('aviation now has a constituent', equities.equitiesForSectors(['Aviation'], 6).map((c) => c.symbol), ['INDIGO'])
+check('every ranked sector gets a company before any gets a second',
+  equities.equitiesForSectors(['Aviation', 'Chemicals', 'Auto', 'Energy'], 6).map((c) => c.symbol),
+  ['INDIGO', 'GRASIM', 'MARUTI', 'RELIANCE', 'M&M', 'ONGC'])
 check('the demerged Tata Motors resolves', equities.RENAMED_SYMBOLS.TATAMOTORS.to, 'TMPV')
 
 // ───────────────────────────── directory ─────────────────────────────

@@ -6,6 +6,14 @@ interface TransmissionFlowProps {
   direction: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL'
   sectors: string[]
   stockSymbol?: string
+  /**
+   * The stock's own event-impact score (50 = no net effect) and sector. When
+   * given, the chain is drawn from that company's side: a crude spike is a
+   * headwind for the market and a tailwind for an upstream producer, and
+   * colouring the producer red because the market fell was simply wrong.
+   */
+  stockImpactScore?: number | null
+  stockSector?: string
   explanation?: string
 }
 
@@ -15,14 +23,16 @@ const DIRECTION_META: Record<string, { color: string; label: string }> = {
   NEUTRAL: { color: 'var(--hold)', label: 'Mixed signal' },
 }
 
-function Node({ title, sub, color, glow }: { title: string; sub: string; color: string; glow?: boolean }) {
+function Node({ title, sub, color, glow, raw }: { title: string; sub: string; color: string; glow?: boolean; raw?: boolean }) {
   return (
     <div className="flex flex-col items-center text-center w-[104px] flex-shrink-0">
       <div
         className="w-3 h-3 rounded-full mb-2 border-2"
         style={{ background: glow ? color : 'var(--surface)', borderColor: color, boxShadow: glow ? `0 0 12px ${color}` : undefined }}
       />
-      <p className="text-[11px] font-semibold text-ink leading-tight capitalize">{title.toLowerCase()}</p>
+      <p className={`text-[11px] font-semibold text-ink leading-tight ${raw ? 'font-mono' : 'capitalize'}`}>
+        {raw ? title : title.toLowerCase()}
+      </p>
       <p className="text-[9px] text-ink-faint mt-0.5 uppercase tracking-wide">{sub}</p>
     </div>
   )
@@ -46,17 +56,27 @@ export default function TransmissionFlow({
   direction,
   sectors,
   stockSymbol,
+  stockImpactScore,
+  stockSector,
   explanation,
 }: TransmissionFlowProps) {
-  const meta = DIRECTION_META[direction] || DIRECTION_META.NEUTRAL
-  const sectorLabel = sectors.slice(0, 2).join(' / ') || 'Sector'
+  const fromStock = Boolean(stockSymbol) && typeof stockImpactScore === 'number'
+  const stockDirection = !fromStock
+    ? direction
+    : stockImpactScore! >= 55
+      ? 'POSITIVE'
+      : stockImpactScore! <= 45
+        ? 'NEGATIVE'
+        : 'NEUTRAL'
+  const meta = DIRECTION_META[stockDirection] || DIRECTION_META.NEUTRAL
+  const sectorLabel = (fromStock && stockSector) || sectors.slice(0, 2).join(' / ') || 'Sector'
 
-  const steps = [
+  const steps: { title: string; sub: string; raw?: boolean }[] = [
     { title: (eventType || 'Event').replace(/_/g, ' '), sub: 'Event' },
     { title: (economicVariable || 'Variable').replace(/_/g, ' '), sub: 'Variable' },
-    { title: meta.label, sub: 'Transmission' },
+    { title: meta.label, sub: fromStock ? `For ${stockSymbol}` : 'Transmission' },
     { title: sectorLabel, sub: 'Sector' },
-    ...(stockSymbol ? [{ title: stockSymbol, sub: 'Stock' }] : []),
+    ...(stockSymbol ? [{ title: stockSymbol, sub: 'Stock', raw: true }] : []),
   ]
 
   return (
@@ -64,7 +84,7 @@ export default function TransmissionFlow({
       <div className="flex items-start overflow-x-auto py-2 px-1 -mx-1">
         {steps.map((step, idx) => (
           <div key={idx} className="flex items-start flex-shrink-0">
-            <Node title={step.title} sub={step.sub} color={meta.color} glow={idx === steps.length - 1} />
+            <Node title={step.title} sub={step.sub} color={meta.color} glow={idx === steps.length - 1} raw={step.raw} />
             {idx < steps.length - 1 && <Connector color={meta.color} />}
           </div>
         ))}

@@ -23,6 +23,7 @@ const MODULES = [
   'lib/market/yahooClient.ts',
   'lib/market/stooq.ts',
   'lib/market/frankfurter.ts',
+  'lib/market/historicalEngine.ts',
 ]
 
 // Emitted inside the project so Node resolves the project's node_modules.
@@ -72,7 +73,8 @@ const { classifyEventByRules, categorizeNewsByRules, buildCounterArgumentFromRul
   require(path.join(out, 'ai/ruleClassifier.js'))
 const { parseRssFeed } = require(path.join(out, 'news/rssNews.js'))
 const { parseChart } = require(path.join(out, 'market/yahooFinance.js'))
-const { analyseImpact } = require(path.join(out, 'ai/impactAnalyzer.js'))
+const { analyseImpact, impactScore } = require(path.join(out, 'ai/impactAnalyzer.js'))
+const { historicalReturnToScore } = require(path.join(out, 'market/historicalEngine.js'))
 const { equitiesForSectors, sectorsWithoutConstituents } =
   require(path.join(out, 'market/indianEquities.js'))
 const { calculateCompositeFromAvailable, recommendationFromComposite } =
@@ -225,6 +227,22 @@ const strong = buildCounterArgumentFromRules({
 checkThat('an all-strong profile still produces a bear case', strong.bearCase.length > 40, strong.bearCase)
 checkThat('an all-strong profile still produces a contradiction', strong.contradictoryEvidence.length > 30)
 
+// The narrative is written from the company's side of the event, so a
+// producer on a crude spike is not told it faces a headwind.
+const producer = buildCounterArgumentFromRules({
+  eventReasoning: 'Crude spike', transmissionExplanation: 'Import bill widens', eventDirection: 'POSITIVE',
+  eventMagnitude: 71, stockSymbol: 'ONGC', compositeScore: 76,
+  fundamentalScore: 73, valuationScore: 100, technicalScore: 51, riskScore: 83,
+  eventPositives: ['Upstream producers realise a higher price on every barrel they lift, with costs largely unchanged.'],
+  eventNegatives: ['A wider current account deficit pressures the rupee, importing further inflation.'],
+})
+checkThat('a beneficiary is described as facing a tailwind', producer.bullCase.includes('a tailwind'), producer.bullCase)
+checkThat('the bull case names how the event helps', producer.bullCase.includes('upstream producers realise'), producer.bullCase)
+checkThat('the bear case names how the event hurts, in sentence case',
+  producer.bearCase.startsWith('Through the event itself, a wider current account deficit'), producer.bearCase)
+checkThat('the sell-off risk is not offered to a beneficiary',
+  !producer.keyRisks.some((r) => /sell-off/.test(r)), JSON.stringify(producer.keyRisks))
+
 // ───────────────────────────── RSS parsing ─────────────────────────────
 section('parseRssFeed')
 const googleFeed = `<rss><channel>
@@ -358,6 +376,69 @@ check('company impact carries the company name', withCompanies.companyImpacts[0]
 checkThat('company impact has both sides',
   withCompanies.companyImpacts[0].positives.length > 0 &&
     withCompanies.companyImpacts[0].negatives.length > 0)
+
+// Treasury effects run the opposite way to margin: falling yields mark bond
+// holdings up. The table used to say a cut hurt lenders' bond portfolios.
+checkThat('rate cut names the treasury gain on bond holdings',
+  withCompanies.companyImpacts[0].positives.some((t) => /treasury gains/i.test(t)),
+  JSON.stringify(withCompanies.companyImpacts[0].positives))
+checkThat('rate hike names the treasury loss on bond holdings',
+  banking.negatives.some((t) => /treasury losses/i.test(t)), JSON.stringify(banking.negatives))
+
+section('per-company event impact score')
+
+// The regression: every company used to take the event's single market
+// direction, so a crude spike scored ONGC as a loser alongside IndiGo.
+const crudeCompanies = analyseImpact({
+  title: 'Brent crude surges past $95 a barrel after OPEC output cut',
+  sectors: ['Aviation', 'Energy', 'Chemicals'],
+  companies: [
+    { symbol: 'INDIGO', name: 'InterGlobe Aviation', sector: 'Aviation' },
+    { symbol: 'ONGC', name: 'Oil & Natural Gas Corporation', sector: 'Energy' },
+    { symbol: 'GRASIM', name: 'Grasim Industries', sector: 'Chemicals' },
+  ],
+})
+const [indigoRead, ongcRead, grasimRead] = crudeCompanies.companyImpacts
+const mag = crudeCompanies.magnitude
+checkThat('crude spike scores the airline below neutral', impactScore(indigoRead, mag) < 50,
+  String(impactScore(indigoRead, mag)))
+checkThat('crude spike scores the producer above neutral', impactScore(ongcRead, mag) > 50,
+  String(impactScore(ongcRead, mag)))
+checkThat('crude spike scores the chemicals maker below neutral', impactScore(grasimRead, mag) < 50,
+  String(impactScore(grasimRead, mag)))
+check('a one-sided read takes the full magnitude', impactScore({ balance: -1 }, 60), 20)
+check('a balanced read is neutral', impactScore({ balance: 0 }, 80), 50)
+check('magnitude is clamped to the scale', impactScore({ balance: 1 }, 400), 100)
+// Two direct benefits against one broad caveat: (2 − 0.5) / (2 + 0.5) = 0.6.
+check('a broad caveat weighs half a direct point', ongcRead.balance, 0.6)
+check('the airline read is wholly negative', indigoRead.balance, -1)
+
+const cut = analyseImpact({
+  title: 'RBI cuts the repo rate by 25 basis points to support growth',
+  sectors: ['Financials', 'Auto'],
+  companies: [
+    { symbol: 'BAJFINANCE', name: 'Bajaj Finance', sector: 'Financials' },
+    { symbol: 'MARUTI', name: 'Maruti Suzuki', sector: 'Auto' },
+  ],
+})
+const [nbfcCut, autoCut] = cut.companyImpacts
+checkThat('a rate cut helps a bond-funded lender', impactScore(nbfcCut, cut.magnitude) > 50,
+  `${impactScore(nbfcCut, cut.magnitude)} ${JSON.stringify(nbfcCut)}`)
+checkThat('a rate cut names the NBFC funding benefit',
+  nbfcCut.positives.some((t) => /NBFC/.test(t)), JSON.stringify(nbfcCut.positives))
+checkThat('a rate cut helps EMI-financed car demand', impactScore(autoCut, cut.magnitude) > 50,
+  `${impactScore(autoCut, cut.magnitude)} ${JSON.stringify(autoCut)}`)
+
+section('historical reaction factor')
+
+// A sector that reliably fell after similar events is a weaker opportunity,
+// whatever the event's direction. The old mapping rewarded "confirmation" and
+// scored a reliable fall after a negative event as a strength.
+check('no average move is neutral', historicalReturnToScore(0), 50)
+check('a 2% average rise scores 70', historicalReturnToScore(2), 70)
+check('a 2% average fall scores 30', historicalReturnToScore(-2), 30)
+check('a large fall is capped at 0', historicalReturnToScore(-9), 0)
+check('a large rise is capped at 100', historicalReturnToScore(12), 100)
 
 section('evidence-gated recommendations')
 

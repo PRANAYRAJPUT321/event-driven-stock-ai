@@ -6,6 +6,7 @@ import ScoreGauge from '@/components/charts/ScoreGauge'
 import TransmissionFlow from '@/components/charts/TransmissionFlow'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import ScoreChip from '@/components/ui/ScoreChip'
+import EventReadChip from '@/components/ui/EventReadChip'
 import NewsImpactPanel from '@/components/NewsImpactPanel'
 import ImpactBreakdown from '@/components/ImpactBreakdown'
 
@@ -46,6 +47,11 @@ export interface AnalysisPayload {
     technicalScore: number | null
     riskScore: number | null
     riskLevel: string
+    /** This company's own read of the event, from its sector's side of the channel. */
+    eventImpactScore?: number
+    eventImpactDirection?: 'POSITIVE' | 'NEGATIVE' | 'MIXED' | 'NEUTRAL'
+    eventPositives?: string[]
+    eventNegatives?: string[]
     opportunityScore: number
     recommendation: string
     /** Share of the scoring weight that had real data behind it, 0-1. */
@@ -85,6 +91,12 @@ export default function AnalysisResult({
   // company-level verdict that was never computed.
   const unrated = stocks.filter((s) => s.recommendation === 'UNRATED').length
   const unmatched = payload.unmatchedSectors ?? []
+  // With no matching past events the historical factor is dropped from every
+  // score. Said once here instead of as a lower "evidence" figure on each row.
+  const noHistory =
+    stocks.length > 0 && stocks.every((s) => s.excludedFactors?.includes('historicalReaction'))
+  const companyGaps = (s: AnalysisPayload['stocks'][number]) =>
+    (s.excludedFactors ?? []).filter((f) => !(noHistory && f === 'historicalReaction'))
   const universe = payload.sectorUniverse ?? []
 
   return (
@@ -128,6 +140,8 @@ export default function AnalysisResult({
           direction={classification.direction}
           sectors={classification.affected_sectors || []}
           stockSymbol={top?.symbol}
+          stockImpactScore={top?.eventImpactScore ?? null}
+          stockSector={top?.sector}
           explanation={classification.transmission_explanation}
         />
       </div>
@@ -233,6 +247,13 @@ export default function AnalysisResult({
           </p>
         )}
 
+        {noHistory && (
+          <p className="text-xs text-ink-muted border border-border rounded-lg px-3 py-2 mb-4">
+            No past event in the reference set matches this one, so the historical-reaction factor is
+            left out and each score is re-weighted over the factors that were measured.
+          </p>
+        )}
+
         <div className="space-y-2">
           {stocks.map((stock) => (
             <Link
@@ -266,6 +287,12 @@ export default function AnalysisResult({
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                <EventReadChip
+                  direction={stock.eventImpactDirection}
+                  score={stock.eventImpactScore}
+                  positives={stock.eventPositives}
+                  negatives={stock.eventNegatives}
+                />
                 <ScoreChip score={stock.fundamentalScore} size="sm" />
                 <ScoreChip score={stock.valuationScore} size="sm" />
                 <ScoreChip score={stock.technicalScore} size="sm" />
@@ -276,8 +303,8 @@ export default function AnalysisResult({
                   <span className="mono-tabular text-lg font-bold text-ink">
                     {stock.opportunityScore}
                   </span>
-                  {typeof stock.coverage === 'number' && stock.coverage < 1 && (
-                    <p className="text-[10px] text-ink-faint mono-tabular">
+                  {typeof stock.coverage === 'number' && stock.coverage < 1 && companyGaps(stock).length > 0 && (
+                    <p className="text-[10px] text-ink-faint mono-tabular" title={`Not sourced: ${companyGaps(stock).join(', ')}`}>
                       {Math.round(stock.coverage * 100)}% evidence
                     </p>
                   )}

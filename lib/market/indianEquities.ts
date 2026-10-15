@@ -130,7 +130,24 @@ export const EQUITY_SECTORS: string[] = Array.from(
  */
 export function equitiesForSectors(sectors: string[], limit: number): EquityConstituent[] {
   if (sectors.length === 0) return []
-  return NIFTY_50.filter((s) => sectors.includes(s.sector)).slice(0, limit)
+  // Round-robin across the sectors, in the order the classifier ranked them,
+  // largest company first within each. Taking constituents in index-list
+  // order instead let the earlier sectors fill every slot: a crude-oil shock
+  // led with Aviation and still scored no airline, because Energy and Auto
+  // came first in the list and six names were enough to crowd it out.
+  const queues = sectors.map((sector) => NIFTY_50.filter((s) => s.sector === sector))
+  const picked: EquityConstituent[] = []
+  for (let round = 0; picked.length < limit; round++) {
+    let added = false
+    for (const queue of queues) {
+      if (round < queue.length && picked.length < limit) {
+        picked.push(queue[round])
+        added = true
+      }
+    }
+    if (!added) break
+  }
+  return picked
 }
 
 /** Affected sectors that no constituent of this universe belongs to. */

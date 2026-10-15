@@ -145,12 +145,7 @@ export const HEATMAP_SYMBOLS: TrackedSymbol[] = [
   { symbol: 'DX-Y.NYB', name: 'DOLLAR INDEX', category: 'currency', tv: 'TVC:DXY' },
 ]
 
-export const CATEGORY_LABELS: Record<QuoteCategory, string> = {
-  domestic: 'India',
-  international: 'Global',
-  commodity: 'Commodities',
-  currency: 'Currencies',
-}
+export { CATEGORY_LABELS } from './types'
 
 // ── Per-symbol memory ──────────────────────────────────────────────────────
 

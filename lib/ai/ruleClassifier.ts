@@ -608,6 +608,11 @@ export function categorizeNewsByRules(title: string, description: string): NewsC
   }
 }
 
+/** "Fuel is…" → "fuel is…", leaving acronyms such as "NBFCs" alone. */
+function lowerFirst(text: string): string {
+  return /^[A-Z](?![A-Z])/.test(text) ? text[0].toLowerCase() + text.slice(1) : text
+}
+
 /**
  * Deterministic stand-in for the LLM's bull/bear/risk narrative.
  *
@@ -619,6 +624,7 @@ export function buildCounterArgumentFromRules(input: DecisionInput): DecisionOut
   const {
     stockSymbol, compositeScore, fundamentalScore, valuationScore,
     technicalScore, riskScore, eventDirection, eventMagnitude,
+    eventPositives = [], eventNegatives = [],
   } = input
 
   const strengths: string[] = []
@@ -655,13 +661,15 @@ export function buildCounterArgumentFromRules(input: DecisionInput): DecisionOut
   return {
     bullCase:
       `The composite score of ${compositeScore}/100 for ${stockSymbol} sits against an event read as ${directionPhrase} ` +
-      `at magnitude ${eventMagnitude}/100. ` +
+      `at magnitude ${eventMagnitude}/100` +
+      (eventPositives.length > 0 ? ` — ${lowerFirst(eventPositives[0])} ` : '. ') +
       (strengths.length > 0
         ? `The supporting components are ${strengths.join('; ')}.`
         : nothingScored
           ? 'No company-level component could be scored at all, so there is no company-specific case here — only the event read.'
           : 'No individual component scores strongly here, so the case rests on the event rather than on the company.'),
     bearCase:
+      (eventNegatives.length > 0 ? `Through the event itself, ${lowerFirst(eventNegatives[0])} ` : '') +
       (weaknesses.length > 0
         ? `The case breaks where ${weaknesses.join('; ')}. Any of those can absorb the event’s benefit before it reaches shareholders.`
         : nothingScored
@@ -683,6 +691,8 @@ export function buildCounterArgumentFromRules(input: DecisionInput): DecisionOut
     keyRisks: [
       eventDirection === 'NEGATIVE'
         ? 'The event may prove milder or shorter-lived than the magnitude implies, making the sell-off the opportunity rather than the risk.'
+        : eventDirection === 'POSITIVE' && eventNegatives.length > 0
+          ? 'The offsetting channel may dominate: the costs this event also imposes can arrive faster than the benefit is realised.'
         : 'The event may already be priced in, leaving no move even if the mechanism plays out exactly as described.',
       riskScore !== null && riskScore <= 55
         ? `Elevated leverage or volatility (risk ${riskScore}/100) amplifies the downside if the event goes the other way.`

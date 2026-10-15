@@ -10,12 +10,13 @@ import TransmissionFlow from '@/components/charts/TransmissionFlow'
 import ReturnSparkline from '@/components/charts/ReturnSparkline'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import ScoreChip from '@/components/ui/ScoreChip'
+import EventReadChip from '@/components/ui/EventReadChip'
 import NewsImpactPanel from '@/components/NewsImpactPanel'
 import ImpactBreakdown from '@/components/ImpactBreakdown'
 import CompanyPicker from '@/components/CompanyPicker'
-import { NIFTY_50 } from '@/lib/market/indianEquities'
+import { findEquity, NIFTY_50 } from '@/lib/market/indianEquities'
 import type { User } from '@supabase/supabase-js'
-import type { MarketQuote } from '@/lib/market/types'
+import { CATEGORY_LABELS, type MarketQuote } from '@/lib/market/types'
 
 interface StockScore {
   id: string
@@ -29,6 +30,8 @@ interface StockScore {
   technical_score: number
   risk_score: number
   risk_level: string
+  event_impact_score?: number | null
+  event_impact_direction?: string | null
 }
 
 interface HistoricalSummary {
@@ -49,7 +52,21 @@ interface ClassificationJson {
 // alongside the AI's own transmission-mechanism explanation actually
 // grounds the narrative in something real, rather than every event getting
 // a market strip whether it's relevant or not.
-const GLOBAL_CONTEXT_TRIGGERS = new Set(['GLOBAL_MARKET_SHOCK', 'CURRENCY', 'OIL_PRICE'])
+/**
+ * The live instruments an event actually moves through, by the variable it
+ * acts on. Sorting all indices by absolute move used to put India VIX and the
+ * Nasdaq next to a crude-oil shock while leaving crude itself off the panel.
+ */
+const CONTEXT_BY_DRIVER: Record<string, string[]> = {
+  OIL_PRICE: ['BZ=F', 'CL=F', 'USDINR=X', '^NSEI'],
+  COMMODITY_SHOCK: ['BZ=F', 'CL=F', 'GC=F', '^NSEI'],
+  CURRENCY: ['USDINR=X', 'EURINR=X', '^CNXIT', '^NSEI'],
+  INTEREST_RATE: ['^NSEBANK', '^NSEI', 'USDINR=X', '^BSESN'],
+  INFLATION: ['^NSEI', 'GC=F', 'BZ=F', 'USDINR=X'],
+  GLOBAL_MARKET_SHOCK: ['^GSPC', '^IXIC', '^N225', '^NSEI'],
+  GEOPOLITICAL: ['BZ=F', 'GC=F', 'USDINR=X', '^NSEI'],
+}
+const DEFAULT_CONTEXT = ['^NSEI', '^BSESN', '^NSEBANK', 'USDINR=X']
 
 interface Analysis {
   id: string
@@ -181,10 +198,10 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   useEffect(() => {
     const classification = analysis?.analysis_json
     if (!classification) return
-    const triggered =
-      GLOBAL_CONTEXT_TRIGGERS.has(classification.event_type) ||
-      GLOBAL_CONTEXT_TRIGGERS.has(classification.economic_variable)
-    if (!triggered) return
+    const wanted =
+      CONTEXT_BY_DRIVER[classification.economic_variable] ??
+      CONTEXT_BY_DRIVER[classification.event_type] ??
+      DEFAULT_CONTEXT
 
     async function loadMarketContext() {
       // Live from the keyless market endpoint rather than a cached table, so
@@ -194,14 +211,8 @@ export default function EventDetails({ params }: { params: { id: string } }) {
         const response = await fetch('/api/market/live')
         if (!response.ok) return
         const data = await response.json()
-        const indices = ((data.quotes || []) as MarketQuote[]).filter(
-          (q) => q.category === 'domestic' || q.category === 'international'
-        )
-        // Biggest absolute movers first — those are the ones worth showing.
-        const sorted = [...indices].sort(
-          (a, b) => Math.abs(b.changePct) - Math.abs(a.changePct)
-        )
-        setMarketContext(sorted.slice(0, 4))
+        const bySymbol = new Map(((data.quotes || []) as MarketQuote[]).map((q) => [q.symbol, q]))
+        setMarketContext(wanted.map((symbol) => bySymbol.get(symbol)).filter((q): q is MarketQuote => Boolean(q)))
       } catch {
         // Context is supplementary; a failure here must not break the page.
       }
@@ -381,6 +392,8 @@ export default function EventDetails({ params }: { params: { id: string } }) {
             direction={classification.direction}
             sectors={analysis.affected_sectors || []}
             stockSymbol={topStock?.stock_symbol}
+            stockImpactScore={topStock?.event_impact_score ?? null}
+            stockSector={topStock ? findEquity(topStock.stock_symbol)?.sector : undefined}
             explanation={classification.transmission_explanation}
           />
         </div>
@@ -399,21 +412,22 @@ export default function EventDetails({ params }: { params: { id: string } }) {
           <div className="flex items-center justify-between mb-1">
             <h2 className="text-sm font-bold text-ink flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-accent" />
-              Global Market Context
+              Market Context
             </h2>
             <button onClick={() => router.push('/markets')} className="text-[10px] text-accent-bright hover:underline">
               Full heatmap →
             </button>
           </div>
           <p className="text-xs text-ink-faint mb-4">
-            This event&apos;s classification ({classification?.economic_variable || classification?.event_type}) is
-            the kind that transmits through world markets — here&apos;s where the major indices are right now.
+            The instruments this event moves through (
+            {(classification?.economic_variable || classification?.event_type || '').toLowerCase().replace(/_/g, ' ')}
+            ), live — so the mechanism can be checked against what the market is doing today.
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {marketContext.map((q) => (
               <div key={q.symbol} className="border border-border rounded-lg p-3 tile-hover">
                 <p className="font-mono text-[10px] text-ink-faint uppercase truncate">
-                  {q.category === 'domestic' ? 'India' : 'Global'}
+                  {CATEGORY_LABELS[q.category] ?? q.category}
                 </p>
                 <p className="font-semibold text-ink text-xs truncate" title={q.name}>
                   {q.name}
@@ -555,7 +569,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
                   <th className="text-left py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Stock</th>
                   <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Score</th>
                   <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">View</th>
-                  <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Confidence</th>
+                  <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Event</th>
                   <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Fundamentals</th>
                   <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Valuation</th>
                   <th className="text-center py-3 px-2 text-ink-faint font-medium text-xs uppercase tracking-wide">Technical</th>
@@ -581,7 +595,16 @@ export default function EventDetails({ params }: { params: { id: string } }) {
                     <td className="py-4 px-2 text-center">
                       <RecommendationBadge rec={stock.recommendation} size="sm" />
                     </td>
-                    <td className="py-4 px-2 text-center text-ink-muted font-mono">{(stock.confidence || 0).toFixed(0)}%</td>
+                    <td className="py-4 px-2 text-center">
+                      {stock.event_impact_direction ? (
+                        <EventReadChip
+                          direction={stock.event_impact_direction}
+                          score={stock.event_impact_score ?? null}
+                        />
+                      ) : (
+                        <span className="text-ink-faint">—</span>
+                      )}
+                    </td>
                     <td className="py-4 px-2 text-center text-ink-muted font-mono">{(stock.fundamental_score || 0).toFixed(0)}</td>
                     <td className="py-4 px-2 text-center text-ink-muted font-mono">{(stock.valuation_score || 0).toFixed(0)}</td>
                     <td className="py-4 px-2 text-center text-ink-muted font-mono">{(stock.technical_score || 0).toFixed(0)}</td>

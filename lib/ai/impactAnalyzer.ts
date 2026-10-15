@@ -37,6 +37,13 @@ export interface EntityImpact {
   confidence: number
   positives: string[]
   negatives: string[]
+  /**
+   * Net weight of the two sides, from −1 (only harm) to +1 (only benefit).
+   * Points specific to this entity's sector count fully; broad, market-wide
+   * points count half, because they apply to every company alike and should
+   * not outvote the channel that actually reaches this one.
+   */
+  balance: number
   /** One sentence on how the event reaches this entity at all. */
   mechanism: string
 }
@@ -58,13 +65,14 @@ const CHANNEL_IMPACTS: Record<string, Partial<Record<Polarity, SidedImpact>>> = 
         'A higher policy rate raises the cost of money, which reaches lenders through their funding costs and borrowers through their EMIs.',
       positives: [
         { text: 'Banks reprice floating-rate loans upward faster than they reprice deposits, so net interest margin widens in the first few quarters.', sectors: ['Banking'] },
-        { text: 'Insurers and lenders earn more on the cash and bond portfolios they are required to hold.', sectors: ['Banking', 'Financials'] },
+        { text: 'New deposits and premiums are invested at higher yields, lifting investment income over the following quarters.', sectors: ['Banking', 'Financials'] },
         { text: 'A higher rate differential can attract foreign debt flows, supporting the rupee and cheapening imported inputs.', sectors: ['Energy', 'Chemicals'] },
         { text: 'Companies with net cash on the balance sheet earn more on it and gain a relative advantage over leveraged competitors.', sectors: ['IT', 'FMCG'] },
       ],
       negatives: [
         { text: 'Loan growth slows as borrowing costs rise, shrinking the pool of new credit.', sectors: ['Banking', 'Financials'] },
         { text: 'Deposit costs catch up within two to three quarters, giving back the initial margin gain.', sectors: ['Banking'] },
+        { text: 'Rising yields mark down the government bonds lenders are required to hold, booking treasury losses in the quarter.', sectors: ['Banking', 'Financials'] },
         { text: 'EMI-driven demand for vehicles and homes is deferred, hitting volumes directly.', sectors: ['Auto', 'Realty', 'Consumer'] },
         { text: 'Highly leveraged balance sheets face higher interest costs, compressing net profit.', sectors: ['Utilities', 'Engineering', 'Metals'] },
         { text: 'Higher discount rates compress the valuation of long-duration growth stories.', sectors: ['IT', 'Consumer', 'Retail'] },
@@ -75,14 +83,16 @@ const CHANNEL_IMPACTS: Record<string, Partial<Record<Polarity, SidedImpact>>> = 
         'A lower policy rate cheapens money, reviving credit demand and reducing interest costs across leveraged balance sheets.',
       positives: [
         { text: 'Credit demand revives and loan books grow, which matters more to lenders than the margin they give up.', sectors: ['Banking', 'Financials'] },
+        { text: 'Falling yields lift the value of the government bonds lenders hold, booking treasury gains in the quarter.', sectors: ['Banking', 'Financials'] },
+        { text: 'Lenders that borrow in the bond market rather than from depositors — NBFCs — see funding costs fall faster than their loan yields, widening spreads.', sectors: ['Financials'] },
         { text: 'Rate-sensitive purchases — vehicles, homes, consumer durables — are pulled forward as EMIs fall.', sectors: ['Auto', 'Realty', 'Consumer'] },
         { text: 'Interest costs fall for leveraged companies, flowing straight to net profit.', sectors: ['Utilities', 'Engineering', 'Metals', 'Telecom'] },
         { text: 'Lower discount rates support the valuation of long-duration growth businesses.', sectors: ['IT', 'Consumer', 'Retail'] },
       ],
       negatives: [
         { text: 'Lending yields fall faster than deposit costs, compressing net interest margin in the near term.', sectors: ['Banking'] },
-        { text: 'Returns on the bond and cash portfolios that insurers and lenders must hold decline.', sectors: ['Banking', 'Financials'] },
-        { text: 'A narrower rate differential can weaken the rupee, raising the cost of imported inputs and dollar debt.', sectors: ['Energy', 'Chemicals', 'Auto'] },
+        { text: 'New money is invested at lower yields, trimming insurers’ and lenders’ investment income over time.', sectors: ['Banking', 'Financials'] },
+        { text: 'A narrower rate differential can weaken the rupee, raising the cost of imported inputs and dollar debt.', sectors: ['Energy', 'Chemicals'] },
         { text: 'Easing usually signals concern about growth, so the volume recovery may lag the rate cut considerably.', sectors: [] },
       ],
     },
@@ -327,8 +337,19 @@ const CHANNEL_IMPACTS: Record<string, Partial<Record<Polarity, SidedImpact>>> = 
 }
 
 /** A point applies to an entity if it is broad, or names that entity's sector. */
-function pointsFor(points: ImpactPoint[], sector: string): string[] {
-  return points.filter((p) => p.sectors.length === 0 || p.sectors.includes(sector)).map((p) => p.text)
+function applicable(points: ImpactPoint[], sector: string): ImpactPoint[] {
+  return points.filter((p) => p.sectors.length === 0 || p.sectors.includes(sector))
+}
+
+/** Broad points weigh half a sector-specific one; see EntityImpact.balance. */
+function weight(points: ImpactPoint[]): number {
+  return points.reduce((sum, p) => sum + (p.sectors.length === 0 ? 0.5 : 1), 0)
+}
+
+function balanceOf(positives: ImpactPoint[], negatives: ImpactPoint[]): number {
+  const up = weight(positives)
+  const down = weight(negatives)
+  return up + down === 0 ? 0 : (up - down) / (up + down)
 }
 
 function resolveDirection(positives: string[], negatives: string[]): ImpactDirection {
@@ -396,6 +417,7 @@ export function analyseImpact(request: ImpactRequest): ImpactAnalysis {
       confidence: 20,
       positives: [],
       negatives: [],
+      balance: 0,
       mechanism:
         'No standard transmission channel was recognised in this headline, so no directional read is offered for this entity.',
     })
@@ -414,8 +436,10 @@ export function analyseImpact(request: ImpactRequest): ImpactAnalysis {
   }
 
   const build = (entity: string, kind: 'sector' | 'company', sector: string): EntityImpact => {
-    const positives = pointsFor(sided.positives, sector)
-    const negatives = pointsFor(sided.negatives, sector)
+    const up = applicable(sided.positives, sector)
+    const down = applicable(sided.negatives, sector)
+    const positives = up.map((p) => p.text)
+    const negatives = down.map((p) => p.text)
     const direction = resolveDirection(positives, negatives)
     return {
       entity,
@@ -433,6 +457,7 @@ export function analyseImpact(request: ImpactRequest): ImpactAnalysis {
       ),
       positives,
       negatives,
+      balance: balanceOf(up, down),
       mechanism: sided.mechanism,
     }
   }
@@ -466,4 +491,21 @@ const THEME_BY_EVENT_TYPE: Record<string, string> = {
   REGULATORY: 'regulatory',
   GEOPOLITICAL: 'geopolitical',
   EARNINGS: 'earnings',
+}
+
+/**
+ * The 0-100 "event impact" factor for one entity, from its own two-sided read.
+ *
+ * 50 is no net effect. The event's magnitude sets how far a one-sided read can
+ * move from there, and the entity's balance scales it: an airline facing only
+ * cost points on a crude spike takes the full move down, an upstream producer
+ * with two direct benefits and one broad caveat most of the move up, and an
+ * evenly balanced read stays at 50.
+ *
+ * Scoring every company off the event's single market direction instead put
+ * ONGC on AVOID for a crude spike, which is the one event that pays it.
+ */
+export function impactScore(impact: Pick<EntityImpact, 'balance'>, magnitude: number): number {
+  const balance = Math.max(-1, Math.min(1, impact.balance))
+  return Math.round(50 + balance * (Math.max(0, Math.min(100, magnitude)) / 2))
 }

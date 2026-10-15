@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/server'
 import { classifyEvent, generateCounterArgument } from '@/lib/ai/eventClassifier'
 import { buildCounterArgumentFromRules, classifyEventByRules } from '@/lib/ai/ruleClassifier'
+import { analyseImpact, impactScore, type ImpactDirection } from '@/lib/ai/impactAnalyzer'
 import { fetchStockMetricsMany, type StockMetrics } from '@/lib/market/realMetrics'
 import {
-  getHistoricalReaction,
+  getHistoricalReactions,
   historicalReturnToScore,
+  type HistoricalReactionSummary,
 } from '@/lib/market/historicalEngine'
 import {
   equitiesForSectors,
@@ -109,26 +111,25 @@ export async function POST(request: NextRequest) {
     // ── STEP 2: Historical Event Engine (deterministic, no AI numbers) ──
     const primarySector = classification.affected_sectors?.[0]
     // Historical evidence is the one part that genuinely requires the
-    // database. Without it the engine already has a defined behaviour: a
-    // neutral 50, stated as "limited data" rather than invented.
-    let historical = null
+    // database, and it is per sector: past airline returns after crude spikes
+    // say nothing about producers. A sector with no matching history gets no
+    // historical factor at all — it is excluded from that stock's composite
+    // rather than filled with a neutral 50 that would count as evidence.
+    let historyBySector = new Map<string, HistoricalReactionSummary>()
     if (user && supabase) {
       try {
-        historical = await getHistoricalReaction(
+        historyBySector = await getHistoricalReactions(
           supabase,
           classification.event_type,
           classification.economic_variable,
-          classification.direction,
-          primarySector
+          classification.direction
         )
       } catch {
-        historical = null
+        historyBySector = new Map()
       }
     }
-
-    const historicalReactionScore = historical
-      ? historicalReturnToScore(historical.avgSectorReturn.d5, classification.direction as any)
-      : 50 // neutral fallback when no historical match exists
+    // The headline evidence shown on the page is the primary sector's.
+    const historical = (primarySector && historyBySector.get(primarySector)) || null
 
     // ── STEP 3: Affected Stocks ─────────────────────────────────────────
     // The NIFTY 50 constituent list (lib/market/indianEquities.ts) is the
@@ -167,11 +168,49 @@ export async function POST(request: NextRequest) {
     }
 
     // ── STEP 4: Multi-Factor Scoring from real market data ──────────────
-    const eventImpactScore = classification.direction === 'NEGATIVE'
-      ? 50 - classification.magnitude / 2
-      : classification.direction === 'POSITIVE'
-        ? 50 + classification.magnitude / 2
-        : 50
+    // The event's net market direction, used for the headline and as the
+    // fallback when no transmission channel was recognised.
+    const eventImpactScore = Math.round(
+      classification.direction === 'NEGATIVE'
+        ? 50 - classification.magnitude / 2
+        : classification.direction === 'POSITIVE'
+          ? 50 + classification.magnitude / 2
+          : 50
+    )
+
+    // Each company's own read of the event, from its sector's side of the
+    // transmission channel: a crude spike is a cost shock to an airline and a
+    // windfall to a producer, and one global direction scored both the same.
+    const impact = analyseImpact({
+      title: event,
+      sectors,
+      companies: candidates.map((c) => ({ symbol: c.symbol, name: c.name, sector: c.sector })),
+    })
+    const impactBySymbol = new Map(
+      candidates.map((c, i) => {
+        const read = impact.companyImpacts[i]
+        if (impact.unrecognised || !read) {
+          return [
+            c.symbol,
+            {
+              score: eventImpactScore,
+              direction: classification.direction as ImpactDirection,
+              positives: [] as string[],
+              negatives: [] as string[],
+            },
+          ] as const
+        }
+        return [
+          c.symbol,
+          {
+            score: impactScore(read, classification.magnitude),
+            direction: read.direction,
+            positives: read.positives,
+            negatives: read.negatives,
+          },
+        ] as const
+      })
+    )
 
     // One screener request covers every candidate's price, valuation and
     // fundamentals; each also gets a year of daily closes for volatility.
@@ -186,6 +225,8 @@ export async function POST(request: NextRequest) {
 
     const stockResults = candidates.map((stock) => {
       const metrics = metricsBySymbol.get(stock.symbol) ?? null
+      const eventRead = impactBySymbol.get(stock.symbol)!
+      const sectorHistory = historyBySector.get(stock.sector) ?? null
 
       const fundamentalScore = scoreFundamental(metrics?.fundamental ?? null)
       const valuationScore = scoreValuation(metrics?.valuation ?? null, peerMedianPe, peerMedianPb)
@@ -193,8 +234,8 @@ export async function POST(request: NextRequest) {
       const riskScoreValue = scoreRisk(metrics?.risk ?? null)
 
       const composite = calculateCompositeFromAvailable({
-        eventImpact: eventImpactScore,
-        historicalReaction: historicalReactionScore,
+        eventImpact: eventRead.score,
+        historicalReaction: sectorHistory ? historicalReturnToScore(sectorHistory.avgSectorReturn.d5) : null,
         fundamentalStrength: fundamentalScore,
         valuation: valuationScore,
         technicalCondition: technicalScore,
@@ -204,6 +245,7 @@ export async function POST(request: NextRequest) {
       return {
         stock: { ...stock, id: idBySymbol.get(stock.symbol) },
         metrics,
+        eventRead,
         fundamentalScore,
         valuationScore,
         technicalScore,
@@ -230,7 +272,12 @@ export async function POST(request: NextRequest) {
       const decisionInput = {
         eventReasoning: classification.reasoning,
         transmissionExplanation: classification.transmission_explanation,
-        eventDirection: classification.direction,
+        // This company's own read, not the market-wide one: the narrative for
+        // an upstream producer on a crude spike must not call it a headwind.
+        eventDirection:
+          topStock.eventRead.score >= 55 ? 'POSITIVE' : topStock.eventRead.score <= 45 ? 'NEGATIVE' : 'NEUTRAL',
+        eventPositives: topStock.eventRead.positives,
+        eventNegatives: topStock.eventRead.negatives,
         eventMagnitude: classification.magnitude,
         stockSymbol: topStock.stock.symbol,
         compositeScore: topStock.compositeScore,
@@ -285,8 +332,8 @@ export async function POST(request: NextRequest) {
             event_analysis_id: analysisData.id,
             stock_id: r.stock.id,
             stock_symbol: r.stock.symbol,
-            event_impact_score: eventImpactScore,
-            event_impact_direction: classification.direction,
+            event_impact_score: r.eventRead.score,
+            event_impact_direction: r.eventRead.direction,
             fundamental_score: r.fundamentalScore,
             valuation_score: r.valuationScore,
             technical_score: r.technicalScore,
@@ -339,6 +386,11 @@ export async function POST(request: NextRequest) {
           technicalScore: r.technicalScore,
           riskScore: r.riskScoreValue,
           riskLevel: riskScoreToLevel(r.riskScoreValue),
+          // How the event reaches this company, from its own sector's side.
+          eventImpactScore: r.eventRead.score,
+          eventImpactDirection: r.eventRead.direction,
+          eventPositives: r.eventRead.positives,
+          eventNegatives: r.eventRead.negatives,
           opportunityScore: r.compositeScore,
           recommendation: r.recommendation,
           // How much of the default weighting had real data behind it, and
