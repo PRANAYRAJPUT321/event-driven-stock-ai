@@ -25,6 +25,9 @@ export async function GET(request: NextRequest) {
     )
   ).slice(0, MAX_SYMBOLS)
 
+  // ?spark=1 adds a month of daily closes per symbol, for row sparklines.
+  const withSparks = request.nextUrl.searchParams.get('spark') === '1'
+
   if (symbols.length === 0) {
     return NextResponse.json({ error: 'Provide a comma-separated symbols list' }, { status: 400 })
   }
@@ -33,13 +36,17 @@ export async function GET(request: NextRequest) {
     const { quotes, failed, fetchedAt } = await fetchEquityQuotes(
       symbols.map((symbol) => ({ symbol, name: symbol, sector: '' })),
       REVALIDATE_SECONDS,
-      { withSparks: false }
+      { withSparks }
     )
 
     // Keyed by symbol so callers can look up without scanning.
-    const prices: Record<string, { price: number; changePct: number }> = {}
+    const prices: Record<string, { price: number; changePct: number; spark?: number[] }> = {}
     for (const quote of quotes) {
-      prices[quote.symbol] = { price: quote.price, changePct: quote.changePct }
+      prices[quote.symbol] = {
+        price: quote.price,
+        changePct: quote.changePct,
+        ...(withSparks && quote.spark ? { spark: quote.spark } : {}),
+      }
     }
 
     return NextResponse.json(

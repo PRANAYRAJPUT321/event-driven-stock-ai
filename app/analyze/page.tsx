@@ -16,11 +16,14 @@ interface NewsSource {
   event_type: string | null
 }
 
+/** Prompts, not news: each one exercises a different transmission channel. */
 const EXAMPLES = [
-  'RBI raises repo rate by 25 basis points',
-  'Crude oil prices surge 10%',
-  'Major tech company announces Q3 earnings beat',
-  'Budget announcement increases tax on FDI',
+  'RBI cuts the repo rate by 25 basis points to support growth',
+  'Brent crude jumps 10% after supply cuts in the Middle East',
+  'Rupee falls past 97 against the US dollar',
+  'Government raises capital-expenditure outlay in the Union Budget',
+  'US Fed signals higher-for-longer interest rates',
+  'Monsoon rainfall forecast at 105% of the long-period average',
 ]
 
 function AnalyzeForm() {
@@ -194,7 +197,8 @@ function AnalyzeForm() {
 
           {!newsSource && (
             <div className="mt-10 pt-8 border-t border-border">
-              <h3 className="font-semibold text-ink text-sm mb-4">Recent Events</h3>
+              <h3 className="font-semibold text-ink text-sm mb-1">Try an example</h3>
+              <p className="text-xs text-ink-faint mb-4">Each one moves the economy through a different channel.</p>
               <div className="grid md:grid-cols-2 gap-3">
                 {EXAMPLES.map((event, idx) => (
                   <button

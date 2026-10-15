@@ -138,9 +138,9 @@ export default function Portfolio() {
             <p className="font-mono text-2xl font-bold text-ink mono-tabular">{positions.length}</p>
           </div>
           <div className="panel p-5">
-            <p className="text-xs text-ink-faint uppercase tracking-wide mb-1">Positive</p>
-            <p className="font-mono text-2xl font-bold text-buy mono-tabular">
-              {positions.length ? Math.round((positive / positions.length) * 100) : 0}%
+            <p className="text-xs text-ink-faint uppercase tracking-wide mb-1">In profit</p>
+            <p className="font-mono text-2xl font-bold text-ink mono-tabular">
+              {priced.length ? `${positive} of ${priced.length}` : '—'}
             </p>
           </div>
           <div className="panel p-5">

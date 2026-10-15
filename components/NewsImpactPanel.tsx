@@ -151,9 +151,9 @@ export default function NewsImpactPanel({
           </div>
 
           {active && active.items.length === 0 ? (
-            <p className="text-sm text-ink-faint">
+            <p className="text-sm text-ink-faint" title={active.error || undefined}>
               {active.error
-                ? `Feed unavailable for ${active.label}: ${active.error}`
+                ? `Headlines for ${active.label} could not be fetched just now — the news feed did not answer.`
                 : `No recent headlines found for ${active.label}.`}
             </p>
           ) : (

@@ -1,11 +1,15 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient, getSessionUser } from '@/lib/supabase/client'
 import BackendDownNotice from '@/components/BackendDownNotice'
 import AppShell from '@/components/layout/AppShell'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
+import Sparkline from '@/components/charts/Sparkline'
+import StockSearchInput, { type StockHit } from '@/components/StockSearchInput'
+import { formatPct, formatPrice } from '@/lib/format'
 import type { User } from '@supabase/supabase-js'
 
 interface AlertEvent {
@@ -21,9 +25,7 @@ interface WatchlistRow {
   stocks: {
     symbol: string
     name: string
-    sector: string
-    pe_ratio: number
-    dividend_yield: number
+    sector: string | null
   } | null
   latestScore: {
     opportunity_score: number
@@ -33,18 +35,41 @@ interface WatchlistRow {
   alerts: AlertEvent[]
 }
 
+interface Live {
+  price: number
+  changePct: number
+  spark?: number[]
+}
+
 export default function Watchlist() {
   const router = useRouter()
   const [backendDown, setBackendDown] = useState(false)
   const supabase = createClient()
   const [user, setUser] = useState<User | null>(null)
   const [rows, setRows] = useState<WatchlistRow[]>([])
+  const [live, setLive] = useState<Record<string, Live>>({})
   const [loading, setLoading] = useState(true)
   const [removingId, setRemovingId] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
 
   useEffect(() => {
     loadWatchlist()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  async function loadPrices(symbols: string[]) {
+    if (symbols.length === 0) {
+      setLive({})
+      return
+    }
+    try {
+      const r = await fetch(`/api/stocks/prices?spark=1&symbols=${encodeURIComponent(symbols.join(','))}`)
+      if (r.ok) setLive((await r.json()).prices || {})
+    } catch {
+      // Rows show "price unavailable" rather than a stale or invented number.
+    }
+  }
 
   async function loadWatchlist() {
     setLoading(true)
@@ -55,19 +80,19 @@ export default function Watchlist() {
       return
     }
     if (!user) {
-      router.push('/auth/login')
+      router.push('/auth/login?next=/watchlist')
       return
     }
     setUser(user)
 
     const { data, error } = await supabase
       .from('watchlists')
-      .select('id, stock_id, created_at, stocks(symbol, name, sector, pe_ratio, dividend_yield)')
+      .select('id, stock_id, created_at, stocks(symbol, name, sector)')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
 
     if (error) {
-      console.error('Failed to load watchlist:', error)
+      setMessage({ tone: 'error', text: `Could not load your watchlist: ${error.message}` })
       setLoading(false)
       return
     }
@@ -82,10 +107,8 @@ export default function Watchlist() {
           .limit(1)
           .maybeSingle()
 
-        // Watchlist alerts: events analyzed since this stock was added whose
-        // affected sectors overlap the stock's own sector — surfaces new
-        // event-driven activity relevant to something already being tracked,
-        // without needing a separate "alerts" table or read/unread state.
+        // Events analysed since this stock was added that touched its sector:
+        // new activity relevant to something already being tracked.
         let alerts: AlertEvent[] = []
         if (row.stocks?.sector) {
           const { data: alertData } = await supabase
@@ -98,19 +121,47 @@ export default function Watchlist() {
             .limit(3)
           alerts = alertData || []
         }
-
         return { ...row, latestScore: scoreData || null, alerts }
       })
     )
 
     setRows(withScores)
     setLoading(false)
+    loadPrices(withScores.map((r) => r.stocks?.symbol).filter(Boolean) as string[])
+  }
+
+  async function handleAdd(hit: StockHit) {
+    if (!user) return
+    if (rows.some((r) => r.stocks?.symbol === hit.symbol)) {
+      setMessage({ tone: 'ok', text: `${hit.name} is already on your watchlist.` })
+      return
+    }
+    setAdding(true)
+    setMessage(null)
+    try {
+      const response = await fetch('/api/stocks/ensure', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: hit.symbol }),
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok || !body.id) throw new Error(body.error || 'Could not add this stock')
+      const { error } = await supabase.from('watchlists').insert({ user_id: user.id, stock_id: body.id })
+      if (error && !/duplicate/i.test(error.message)) throw error
+      setMessage({ tone: 'ok', text: `Added ${hit.name}.` })
+      await loadWatchlist()
+    } catch (err: any) {
+      setMessage({ tone: 'error', text: err?.message || 'Could not add this stock' })
+    } finally {
+      setAdding(false)
+    }
   }
 
   async function handleRemove(watchlistId: string) {
     setRemovingId(watchlistId)
     const { error } = await supabase.from('watchlists').delete().eq('id', watchlistId)
     if (!error) setRows((prev) => prev.filter((r) => r.id !== watchlistId))
+    else setMessage({ tone: 'error', text: `Could not remove: ${error.message}` })
     setRemovingId(null)
   }
 
@@ -119,8 +170,6 @@ export default function Watchlist() {
     router.push('/auth/login')
   }
 
-  // Supabase unreachable: this page's content lives in Postgres, so
-  // there is nothing to show and nowhere useful to redirect to.
   if (backendDown) {
     return (
       <AppShell showTicker={false}>
@@ -129,15 +178,46 @@ export default function Watchlist() {
     )
   }
 
+  const priced = rows.map((r) => live[r.stocks?.symbol ?? '']).filter(Boolean)
+  const upCount = priced.filter((p) => p.changePct > 0).length
+  const downCount = priced.filter((p) => p.changePct < 0).length
+
   return (
     <AppShell userEmail={user?.email} onLogout={handleLogout}>
-      <div className="mb-6 fade-in">
-        <p className="text-xs font-mono uppercase tracking-widest text-accent-bright mb-2">Tracking</p>
-        <h1 className="text-2xl sm:text-3xl font-bold text-ink mb-1">My Watchlist</h1>
-        <p className="text-ink-muted text-sm">Stocks you&apos;re tracking, with their most recent event-driven score</p>
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6 fade-in">
+        <div>
+          <p className="eyebrow mb-2">Tracking</p>
+          <h1 className="text-3xl sm:text-4xl font-bold text-ink tracking-tight">Watchlist</h1>
+          <p className="text-ink-muted text-sm mt-1.5">
+            Live prices for the companies you follow, their latest event-driven score, and new analyses touching
+            their sector.
+          </p>
+        </div>
+        {rows.length > 0 && (
+          <div className="flex gap-3 text-sm">
+            <span className="chip">
+              {rows.length} stock{rows.length === 1 ? '' : 's'}
+            </span>
+            {priced.length > 0 && (
+              <>
+                <span className="chip text-up">▲ {upCount} up today</span>
+                <span className="chip text-down">▼ {downCount} down</span>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
-      <div className="panel p-7">
+      <div className="panel p-4 sm:p-6">
+        <div className="mb-5 max-w-xl">
+          <StockSearchInput onSelect={handleAdd} busy={adding} />
+          {message && (
+            <p className={`text-xs mt-2 ${message.tone === 'ok' ? 'text-up' : 'text-avoid'}`} role="status">
+              {message.text}
+            </p>
+          )}
+        </div>
+
         {loading ? (
           <div className="space-y-2">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -145,68 +225,89 @@ export default function Watchlist() {
             ))}
           </div>
         ) : rows.length === 0 ? (
-          <div className="text-center py-16">
-            <p className="text-ink text-lg">Your watchlist is empty</p>
-            <p className="text-ink-muted text-sm mt-2">Add stocks from an event analysis to monitor them here</p>
-            <button
-              onClick={() => router.push('/analyze')}
-              className="mt-6 bg-accent hover:bg-accent-bright text-on-accent font-semibold px-6 py-2 rounded-lg transition"
-            >
-              Analyze an Event
-            </button>
+          <div className="text-center py-14">
+            <p className="text-4xl mb-3" aria-hidden="true">👀</p>
+            <p className="text-ink text-lg font-semibold">Your watchlist is empty</p>
+            <p className="text-ink-muted text-sm mt-1.5 max-w-md mx-auto">
+              Search any NSE company above to start tracking it, or add the companies an event analysis surfaces.
+            </p>
+            <Link href="/markets" className="btn btn-ghost mt-6">
+              Browse the NIFTY 50 heatmap
+            </Link>
           </div>
         ) : (
-          <div className="space-y-2">
-            {rows.map((row) => (
-              <div
-                key={row.id}
-                className="tile-hover flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-border rounded-lg p-4 hover:bg-surface-hover"
-              >
-                <div className="flex-1">
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => row.stocks?.symbol && router.push(`/stocks/${row.stocks.symbol}`)}
-                      className="font-mono font-bold text-ink hover:text-accent-bright hover:underline"
-                    >
-                      {row.stocks?.symbol}
-                    </button>
-                    <span className="text-ink-muted text-sm">{row.stocks?.name}</span>
-                    <span className="bg-surface-2 text-accent-bright text-[10px] px-2 py-0.5 rounded-full border border-border">
-                      {row.stocks?.sector}
+          <ul className="space-y-2">
+            {rows.map((row) => {
+              const symbol = row.stocks?.symbol ?? ''
+              const q = live[symbol]
+              const up = (q?.changePct ?? 0) >= 0
+              return (
+                <li
+                  key={row.id}
+                  className="tile-hover rounded-xl border border-border p-4 hover:bg-surface-hover flex flex-col md:flex-row md:flex-wrap md:items-center gap-4"
+                >
+                  <Link href={`/stocks/${encodeURIComponent(symbol)}`} className="flex-1 min-w-0 flex items-center gap-4">
+                    <span className="w-11 h-11 rounded-xl bg-surface-2 border border-border flex items-center justify-center font-mono text-[10px] font-bold text-accent flex-shrink-0">
+                      {symbol.slice(0, 5)}
                     </span>
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-ink truncate">{row.stocks?.name}</span>
+                        {row.stocks?.sector && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full border border-border text-ink-muted">{row.stocks.sector}</span>
+                        )}
+                      </span>
+                      <span className="block text-[11px] font-mono text-ink-faint mt-0.5">
+                        NSE: {symbol}
+                        {row.latestScore ? ` · last scored ${row.latestScore.opportunity_score}/100` : ' · not yet scored'}
+                      </span>
+                    </span>
+                  </Link>
+
+                  <div className="flex items-center gap-4 md:gap-6 justify-between md:justify-end">
+                    {q?.spark && q.spark.length > 1 && (
+                      <Sparkline values={q.spark} positive={up} width={96} height={32} />
+                    )}
+                    <div className="text-right min-w-[92px]">
+                      {q ? (
+                        <>
+                          <p className="mono-tabular text-base font-semibold text-ink">₹{formatPrice(q.price)}</p>
+                          <p className={`mono-tabular text-xs font-semibold ${up ? 'text-up' : 'text-down'}`}>
+                            {up ? '▲' : '▼'} {formatPct(q.changePct)}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-xs text-ink-faint">price loading…</p>
+                      )}
+                    </div>
+                    {row.latestScore && <RecommendationBadge rec={row.latestScore.recommendation} size="sm" />}
+                    <button
+                      onClick={() => handleRemove(row.id)}
+                      disabled={removingId === row.id}
+                      className="text-xs font-medium px-3 py-1.5 rounded-lg border border-border text-ink-muted hover:border-avoid-dim hover:text-avoid disabled:opacity-50 transition"
+                      aria-label={`Remove ${row.stocks?.name} from watchlist`}
+                    >
+                      {removingId === row.id ? '…' : 'Remove'}
+                    </button>
                   </div>
-                  {row.latestScore ? (
-                    <p className="text-xs text-ink-faint mt-1.5 flex items-center gap-2">
-                      Last analyzed: score {row.latestScore.opportunity_score}/100
-                      <RecommendationBadge rec={row.latestScore.recommendation} size="sm" />
-                    </p>
-                  ) : (
-                    <p className="text-xs text-ink-faint mt-1.5">No event analysis yet for this stock</p>
-                  )}
+
                   {row.alerts.length > 0 && (
-                    <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    <div className="md:basis-full flex flex-wrap gap-1.5 md:order-last">
                       {row.alerts.map((a) => (
-                        <button
+                        <Link
                           key={a.id}
-                          onClick={() => router.push(`/events/${a.id}`)}
-                          className="text-[10px] bg-accent-dim/40 border border-accent-dim text-accent-bright px-2 py-1 rounded-full hover:bg-accent-dim transition"
+                          href={`/events/${a.id}`}
+                          className="text-[11px] bg-surface-2 border border-accent-dim text-accent px-2.5 py-1 rounded-full hover:bg-surface-hover transition"
                         >
-                          🔔 {a.event_title.length > 40 ? a.event_title.slice(0, 40) + '…' : a.event_title}
-                        </button>
+                          🔔 {a.event_title.length > 48 ? `${a.event_title.slice(0, 48)}…` : a.event_title}
+                        </Link>
                       ))}
                     </div>
                   )}
-                </div>
-                <button
-                  onClick={() => handleRemove(row.id)}
-                  disabled={removingId === row.id}
-                  className="text-avoid hover:text-avoid text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-avoid-dim disabled:opacity-50 transition"
-                >
-                  {removingId === row.id ? 'Removing…' : 'Remove'}
-                </button>
-              </div>
-            ))}
-          </div>
+                </li>
+              )
+            })}
+          </ul>
         )}
       </div>
     </AppShell>
