@@ -7,6 +7,7 @@ import BackendDownNotice from '@/components/BackendDownNotice'
 import AppShell from '@/components/layout/AppShell'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import ScoreChip from '@/components/ui/ScoreChip'
+import { formatDateIST } from '@/lib/format'
 import type { User } from '@supabase/supabase-js'
 
 interface AnalysisRow {
@@ -124,10 +125,10 @@ export default function History() {
                 className="tile-hover w-full text-left flex items-center justify-between border border-border rounded-lg p-4 hover:bg-surface-hover"
               >
                 <div className="min-w-0">
-                  <p className="font-semibold text-ink truncate">{row.event_title}</p>
+                  <p className="font-semibold text-ink line-clamp-2 sm:line-clamp-1 break-words" title={row.event_title}>{row.event_title}</p>
                   <p className="text-xs text-ink-faint mt-1">
                     {row.affected_sectors?.join(', ') || 'No sectors identified'} &middot;{' '}
-                    {new Date(row.created_at).toLocaleDateString()}
+                    {formatDateIST(Date.parse(row.created_at))}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0 ml-4">

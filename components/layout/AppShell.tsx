@@ -20,6 +20,9 @@ const NAV = [
   { href: '/settings', label: 'Settings' },
 ]
 
+/** When the watchlist was last opened; the nav badge counts analyses since. */
+const WATCHLIST_SEEN_KEY = 'pulse-watchlist-seen'
+
 export default function AppShell({
   children,
   userEmail,
@@ -59,10 +62,11 @@ export default function AppShell({
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // Nav badge: count of analyzed events (since each stock was watchlisted)
-  // whose affected sectors overlap the sectors currently on the user's
-  // watchlist — same "relevant activity" signal shown per-row on the
-  // Watchlist page itself, surfaced globally so it's visible from any page.
+  // Nav badge: analyses whose affected sectors overlap the sectors on the
+  // user's watchlist, created since the watchlist was last opened — the same
+  // "relevant activity" signal shown per row on the Watchlist page, surfaced
+  // globally. Counting every such analysis ever run made it a number that
+  // only grew; opening the watchlist now marks them seen.
   useEffect(() => {
     const supabase = createClient()
     let active = true
@@ -91,12 +95,25 @@ export default function AppShell({
         return
       }
 
+      let seen: string | null = null
+      try {
+        if (pathname === '/watchlist') localStorage.setItem(WATCHLIST_SEEN_KEY, new Date().toISOString())
+        seen = localStorage.getItem(WATCHLIST_SEEN_KEY)
+      } catch {
+        // Storage blocked: count from the earliest watch, as before.
+      }
+      if (pathname === '/watchlist') {
+        if (active) setWatchlistAlerts(0)
+        return
+      }
+      const since = seen && new Date(seen).getTime() > new Date(earliest).getTime() ? seen : earliest
+
       const { count } = await supabase
         .from('event_analysis')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', user.id)
         .overlaps('affected_sectors', sectors)
-        .gt('created_at', earliest)
+        .gt('created_at', since)
 
       if (active) setWatchlistAlerts(count || 0)
     }
@@ -134,7 +151,11 @@ export default function AppShell({
                 >
                   {item.label}
                   {item.href === '/watchlist' && watchlistAlerts > 0 && (
-                    <span className="ml-1.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-accent text-on-accent text-[10px] font-bold font-mono">
+                    <span
+                      className="ml-1.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-accent text-on-accent text-[10px] font-bold font-mono"
+                      title={`${watchlistAlerts} new ${watchlistAlerts === 1 ? 'analysis touches' : 'analyses touch'} your watchlist`}
+                      aria-label={`${watchlistAlerts} new`}
+                    >
                       {watchlistAlerts}
                     </span>
                   )}
@@ -199,7 +220,10 @@ export default function AppShell({
             >
               {item.label}
               {item.href === '/watchlist' && watchlistAlerts > 0 && (
-                <span className="ml-1 inline-flex items-center justify-center min-w-[14px] h-3.5 px-1 rounded-full bg-accent text-on-accent text-[9px] font-bold font-mono">
+                <span
+                  className="ml-1 inline-flex items-center justify-center min-w-[14px] h-3.5 px-1 rounded-full bg-accent text-on-accent text-[9px] font-bold font-mono"
+                  aria-label={`${watchlistAlerts} new`}
+                >
                   {watchlistAlerts}
                 </span>
               )}

@@ -220,6 +220,10 @@ export default function Dashboard() {
 
   const session = nseSessionState()
   const name = useMemo(() => {
+    // The first name from the profile (set at signup or in Settings), then
+    // the email's local part as a fallback.
+    const fullName = String(user?.user_metadata?.full_name ?? '').trim()
+    if (fullName) return fullName.split(/\s+/)[0]
     const local = user?.email?.split('@')[0] || ''
     return local ? local[0].toUpperCase() + local.slice(1) : ''
   }, [user])
@@ -506,8 +510,10 @@ export default function Dashboard() {
                     <p className="text-[10px] font-mono opacity-75">
                       {s.count} analys{s.count === 1 ? 'is' : 'es'}
                     </p>
-                    <p className="mono-tabular text-[11px] font-semibold mt-1 opacity-90">
-                      {s.buy} BUY · {s.hold} HOLD · {s.avoid} AVOID
+                    <p className="mono-tabular text-[11px] font-semibold mt-1 opacity-90 flex flex-wrap gap-x-2">
+                      <span className="whitespace-nowrap">{s.buy} BUY</span>
+                      <span className="whitespace-nowrap">{s.hold} HOLD</span>
+                      <span className="whitespace-nowrap">{s.avoid} AVOID</span>
                     </p>
                   </div>
                 )

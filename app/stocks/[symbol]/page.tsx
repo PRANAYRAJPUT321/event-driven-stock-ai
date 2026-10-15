@@ -23,6 +23,7 @@ import {
   nseSessionState,
 } from '@/lib/format'
 import type { StockProfile } from '@/lib/market/stockProfile'
+import { RENAMED_SYMBOLS } from '@/lib/market/indianEquities'
 import type { User } from '@supabase/supabase-js'
 
 type Range = '1d' | '5d' | '1m' | '6m' | 'ytd' | '1y' | '5y' | 'max'
@@ -118,6 +119,13 @@ export default function StockProfilePage({ params }: { params: { symbol: string 
   const router = useRouter()
   const supabase = createClient()
   const symbol = decodeURIComponent(params.symbol).toUpperCase()
+  // Arrived by way of a renamed symbol (see the redirect below): keep the note.
+  const [renamedFrom, setRenamedFrom] = useState<StockProfile['renamed'] | null>(null)
+  useEffect(() => {
+    const from = new URLSearchParams(window.location.search).get('from')?.toUpperCase() ?? ''
+    const rename = RENAMED_SYMBOLS[from]
+    setRenamedFrom(rename && rename.to === symbol ? { from, to: rename.to, note: rename.note } : null)
+  }, [symbol])
 
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<StockProfile | null>(null)
@@ -132,6 +140,7 @@ export default function StockProfilePage({ params }: { params: { symbol: string 
   const [history, setHistory] = useState<History | null>(null)
   const [historyLoading, setHistoryLoading] = useState(true)
   const [historyError, setHistoryError] = useState<string | null>(null)
+  const [historyAttempt, setHistoryAttempt] = useState(0)
 
   const [stockId, setStockId] = useState<string | null>(null)
   const [watched, setWatched] = useState(false)
@@ -173,8 +182,9 @@ export default function StockProfilePage({ params }: { params: { symbol: string 
 
       const p = data as StockProfile
       // An old symbol from saved history: move to the one it trades under now.
+      // The old symbol rides along so the page can still say why it moved.
       if (p.renamed && p.symbol !== symbol) {
-        router.replace(`/stocks/${encodeURIComponent(p.symbol)}`)
+        router.replace(`/stocks/${encodeURIComponent(p.symbol)}?from=${encodeURIComponent(symbol)}`)
       }
       setProfile(p)
       setLoading(false)
@@ -236,7 +246,7 @@ export default function StockProfilePage({ params }: { params: { symbol: string 
     return () => {
       active = false
     }
-  }, [symbol, range])
+  }, [symbol, range, historyAttempt])
 
   // Same-sector constituents, and recent headlines — both secondary, both optional.
   useEffect(() => {
@@ -313,8 +323,38 @@ export default function StockProfilePage({ params }: { params: { symbol: string 
     if (!history || history.candles.length < 2) return null
     const first = history.range === '1d' && history.previousClose ? history.previousClose : history.candles[0].c
     const last = history.candles[history.candles.length - 1].c
-    return { from: first, to: last, pct: first ? ((last - first) / first) * 100 : 0 }
+    // Name the span the data actually covers. A provider can return less
+    // history than the range asked for (a recent listing, or a short feed),
+    // and labelling two months of bars "over 1Y" misstates the return.
+    const startedAt = history.candles[0].t
+    const now = Date.now()
+    const yearStart = new Date(new Date().getFullYear(), 0, 1).getTime()
+    const DAY = 86_400_000
+    const expectedStart: Record<string, number | null> = {
+      '1d': null,
+      '5d': now - 9 * DAY,
+      '1m': now - 31 * DAY,
+      '6m': now - 183 * DAY,
+      ytd: yearStart,
+      '1y': now - 366 * DAY,
+      '5y': now - 5 * 366 * DAY,
+      max: null,
+    }
+    const expected = expectedStart[history.range] ?? null
+    const span = expected === null ? 0 : now - expected
+    const short = history.range === 'max' || (expected !== null && startedAt - expected > Math.max(7 * DAY, span * 0.2))
+    const label =
+      history.range === '1d'
+        ? 'vs previous close'
+        : short
+          ? `since ${formatDateIST(startedAt)}`
+          : `over ${RANGES.find((r) => r.id === history.range)?.label}`
+    return { from: first, to: last, pct: first ? ((last - first) / first) * 100 : 0, label }
   }, [history])
+
+  // The last request failed, for the range now selected: whatever chart is in
+  // memory belongs to a different range and must not be shown as this one.
+  const rangeFailed = Boolean(historyError) && !historyLoading && (!history || history.range !== range)
 
   const session = nseSessionState()
   const up = (profile?.changePct ?? 0) >= 0
@@ -371,10 +411,11 @@ export default function StockProfilePage({ params }: { params: { symbol: string 
         </div>
       ) : profile ? (
         <>
-          {profile.renamed && (
+          {(profile.renamed ?? renamedFrom) && (
             <p className="text-xs text-ink-muted bg-surface-2 border border-border rounded-xl px-4 py-2.5 mb-4">
-              <span className="font-semibold text-ink">{profile.renamed.from}</span> now trades as{' '}
-              <span className="font-semibold text-ink">{profile.renamed.to}</span>. {profile.renamed.note}
+              <span className="font-semibold text-ink">{(profile.renamed ?? renamedFrom)!.from}</span> now trades as{' '}
+              <span className="font-semibold text-ink">{(profile.renamed ?? renamedFrom)!.to}</span>.{' '}
+              {(profile.renamed ?? renamedFrom)!.note}
             </p>
           )}
 
@@ -460,13 +501,13 @@ export default function StockProfilePage({ params }: { params: { symbol: string 
               </div>
 
               <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-3">
-                {period && (
+                {period && !rangeFailed && (
                   <p className="text-sm">
                     <span className={`mono-tabular font-semibold ${period.pct >= 0 ? 'text-up' : 'text-down'}`}>
                       {period.pct >= 0 ? '▲' : '▼'} {formatPct(period.pct)}
                     </span>{' '}
                     <span className="text-ink-faint text-xs">
-                      {range === '1d' ? 'vs previous close' : `over ${RANGES.find((r) => r.id === range)?.label}`} · {formatPrice(period.from)} →{' '}
+                      {period.label} · {formatPrice(period.from)} →{' '}
                       {formatPrice(period.to)}
                     </span>
                   </p>
@@ -512,10 +553,27 @@ export default function StockProfilePage({ params }: { params: { symbol: string 
                 </div>
               )}
 
-              {historyError && !history ? (
+              {rangeFailed ? (
+                // The range the reader picked failed. Keeping the previous
+                // range's chart under the new range's highlighted button
+                // presented, say, a month of daily bars as the 1D chart.
                 <div className="h-72 flex flex-col items-center justify-center text-center gap-2">
-                  <p className="text-sm text-ink">Chart unavailable right now</p>
-                  <p className="text-xs text-ink-faint max-w-sm">{historyError}</p>
+                  <p className="text-sm text-ink">
+                    No {RANGES.find((r) => r.id === range)?.label} chart for {profile.symbol} right now
+                  </p>
+                  <p className="text-xs text-ink-faint max-w-sm" title={historyError ?? undefined}>
+                    None of the price providers returned bars for this range just now.
+                  </p>
+                  <div className="flex flex-wrap justify-center gap-2 mt-2">
+                    <button onClick={() => setHistoryAttempt((n) => n + 1)} className="btn btn-ghost text-xs">
+                      Try again
+                    </button>
+                    {history && (
+                      <button onClick={() => setRange(history.range)} className="btn btn-ghost text-xs">
+                        Show {RANGES.find((r) => r.id === history.range)?.label} instead
+                      </button>
+                    )}
+                  </div>
                 </div>
               ) : !history ? (
                 <div className="skeleton h-80" />
@@ -533,10 +591,9 @@ export default function StockProfilePage({ params }: { params: { symbol: string 
                   ohlc={history.ohlc}
                 />
               )}
-              {history && (
+              {history && !rangeFailed && (
                 <p className="text-[10px] text-ink-faint mt-3">
                   {history.interval} bars · times in IST · via {SOURCE_NAMES[history.source] ?? history.source}
-                  {historyError ? ` · last update failed: ${historyError}` : ''}
                 </p>
               )}
             </section>

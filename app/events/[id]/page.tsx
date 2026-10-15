@@ -367,6 +367,16 @@ export default function EventDetails({ params }: { params: { id: string } }) {
             <h1 className="text-2xl sm:text-3xl font-bold text-ink mb-4 leading-snug">{analysis.event_title}</h1>
             <div className="flex flex-wrap items-center gap-2">
               <RecommendationBadge rec={analysis.recommendation} />
+              {/* The headline verdict and gauge are the top-ranked company's,
+                  not a verdict on the event itself — say whose. */}
+              {topStock && (
+                <button
+                  onClick={() => router.push(`/stocks/${topStock.stock_symbol}`)}
+                  className="text-xs text-ink-muted hover:text-accent mr-2"
+                >
+                  top pick <span className="font-mono font-semibold text-ink">{topStock.stock_symbol}</span>
+                </button>
+              )}
               {analysis.affected_sectors?.map((sector) => (
                 <span key={sector} className="bg-surface text-ink-muted border border-border px-2.5 py-1 rounded-full text-xs">
                   {sector}

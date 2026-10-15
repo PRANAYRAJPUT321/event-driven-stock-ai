@@ -118,8 +118,18 @@ export default function Watchlist() {
             .overlaps('affected_sectors', [row.stocks.sector])
             .gt('created_at', row.created_at)
             .order('created_at', { ascending: false })
-            .limit(3)
-          alerts = alertData || []
+            .limit(12)
+          // The same event analysed again is one alert, not three: keep the
+          // most recent run of each title.
+          const seen = new Set<string>()
+          alerts = (alertData || [])
+            .filter((a) => {
+              const key = a.event_title.trim().toLowerCase()
+              if (seen.has(key)) return false
+              seen.add(key)
+              return true
+            })
+            .slice(0, 3)
         }
         return { ...row, latestScore: scoreData || null, alerts }
       })
@@ -292,14 +302,15 @@ export default function Watchlist() {
                   </div>
 
                   {row.alerts.length > 0 && (
-                    <div className="md:basis-full flex flex-wrap gap-1.5 md:order-last">
+                    <div className="md:basis-full flex flex-wrap gap-1.5 md:order-last min-w-0">
                       {row.alerts.map((a) => (
                         <Link
                           key={a.id}
                           href={`/events/${a.id}`}
-                          className="text-[11px] bg-surface-2 border border-accent-dim text-accent px-2.5 py-1 rounded-full hover:bg-surface-hover transition"
+                          title={a.event_title}
+                          className="max-w-full truncate text-[11px] bg-surface-2 border border-accent-dim text-accent px-2.5 py-1 rounded-full hover:bg-surface-hover transition"
                         >
-                          🔔 {a.event_title.length > 48 ? `${a.event_title.slice(0, 48)}…` : a.event_title}
+                          🔔 {a.event_title}
                         </Link>
                       ))}
                     </div>

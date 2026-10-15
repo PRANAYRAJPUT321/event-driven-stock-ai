@@ -299,16 +299,20 @@ export default function PriceChart({
         {yTicks.map((v) => (
           <g key={v}>
             <line x1={MARGIN.left} x2={MARGIN.left + plotW} y1={yAt(v)} y2={yAt(v)} stroke="var(--chart-grid)" strokeWidth={1} />
-            <text
-              x={MARGIN.left + plotW + 8}
-              y={yAt(v)}
-              dy="0.32em"
-              fontSize={10}
-              fill="var(--chart-axis)"
-              className="mono-tabular"
-            >
-              {formatPrice(v, v >= 1000 ? 0 : v >= 10 ? 1 : 2)}
-            </text>
+            {/* The last-price tag owns its slice of the axis; a tick label
+                underneath it would print two numbers on top of each other. */}
+            {Math.abs(yAt(v) - yAt(last)) > 14 && (
+              <text
+                x={MARGIN.left + plotW + 8}
+                y={yAt(v)}
+                dy="0.32em"
+                fontSize={10}
+                fill="var(--chart-axis)"
+                className="mono-tabular"
+              >
+                {formatPrice(v, v >= 1000 ? 0 : v >= 10 ? 1 : 2)}
+              </text>
+            )}
           </g>
         ))}
 

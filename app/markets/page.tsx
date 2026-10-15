@@ -98,7 +98,7 @@ function HeatTile({ tile, scale, index }: { tile: Tile; scale: HeatScale; index:
       <div className="flex items-end justify-between gap-2">
         <div className="min-w-0">
           <p className="mono-tabular text-[17px] font-bold leading-tight">{formatPrice(tile.price)}</p>
-          <p className="mono-tabular text-xs font-semibold opacity-90">
+          <p className="mono-tabular text-xs font-semibold opacity-90 whitespace-nowrap">
             {tile.changePct >= 0 ? '▲' : '▼'} {formatPct(tile.changePct)}
           </p>
         </div>
@@ -151,7 +151,9 @@ export default function Markets() {
   const [coins, setCoins] = useState<CryptoCoin[]>([])
   const [sectorFilter, setSectorFilter] = useState('All')
   const [failed, setFailed] = useState<string[]>([])
-  const [errors, setErrors] = useState<string[]>([])
+  // Each failure names the tabs it empties, so a crypto outage is reported on
+  // the crypto tab instead of as a red banner above the NIFTY 50 heatmap.
+  const [errors, setErrors] = useState<{ tabs: Tab[]; message: string }[]>([])
   const [fetchedAt, setFetchedAt] = useState<string | null>(null)
   const [staleAgeSeconds, setStaleAgeSeconds] = useState<number | null>(null)
   const [sources, setSources] = useState<string[]>([])
@@ -200,7 +202,7 @@ export default function Markets() {
     ])
     if (!active) return
 
-    const nextErrors: string[] = []
+    const nextErrors: { tabs: Tab[]; message: string }[] = []
     const nextFailed: string[] = []
     const nextSources = new Set<string>()
 
@@ -212,7 +214,10 @@ export default function Markets() {
       setStaleAgeSeconds(body.stale ? body.staleAgeSeconds ?? null : null)
       for (const q of body.quotes || []) if (q.source) nextSources.add(SOURCE_LABELS[q.source] ?? q.source)
     } else {
-      nextErrors.push('Indices, commodities and currencies are unavailable right now.')
+      nextErrors.push({
+        tabs: ['india', 'world', 'commodities', 'currencies'],
+        message: 'Indices, commodities and currencies are unavailable right now.',
+      })
     }
 
     if (equityRes.status === 'fulfilled' && equityRes.value.ok) {
@@ -221,13 +226,13 @@ export default function Markets() {
       nextFailed.push(...(body.failed || []))
       for (const q of body.quotes || []) if (q.source) nextSources.add(SOURCE_LABELS[q.source] ?? q.source)
     } else {
-      nextErrors.push('NIFTY 50 quotes are unavailable right now.')
+      nextErrors.push({ tabs: ['equities'], message: 'NIFTY 50 quotes are unavailable right now.' })
     }
 
     if (cryptoRes.status === 'fulfilled' && cryptoRes.value.ok) {
       setCoins(cryptoRes.value.body.coins || [])
     } else {
-      nextErrors.push('Crypto prices are unavailable right now.')
+      nextErrors.push({ tabs: ['crypto'], message: 'Crypto prices are unavailable right now.' })
     }
 
     setFailed(nextFailed)
@@ -360,12 +365,6 @@ export default function Markets() {
             })}
       </div>
 
-      {errors.map((message) => (
-        <p key={message} className="text-sm text-avoid bg-avoid-dim border border-avoid-dim rounded-xl px-4 py-2.5 mb-3">
-          {message} It retries automatically every minute.
-        </p>
-      ))}
-
       <div className="flex gap-2 mb-5 overflow-x-auto pb-1 scrollbar-none" role="tablist" aria-label="Market">
         {TABS.map((t) => (
           <button
@@ -380,6 +379,14 @@ export default function Markets() {
           </button>
         ))}
       </div>
+
+      {errors
+        .filter((e) => e.tabs.includes(tab))
+        .map(({ message }) => (
+          <p key={message} className="text-sm text-avoid bg-avoid-dim border border-avoid-dim rounded-xl px-4 py-2.5 mb-4" role="status">
+            {message} It retries automatically every minute.
+          </p>
+        ))}
 
       {tab === 'equities' ? (
         <div className="grid xl:grid-cols-[1fr_300px] gap-5">

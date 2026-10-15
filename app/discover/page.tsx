@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient, getSessionUser } from '@/lib/supabase/client'
 import AppShell from '@/components/layout/AppShell'
 import type { User } from '@supabase/supabase-js'
+import { formatRelative } from '@/lib/format'
 
 interface NewsItem {
   id: string
@@ -136,7 +137,7 @@ export default function Discover() {
           <p className="text-ink-muted text-sm">
             {live
               ? 'Straight from the wire, categorised on the fly. Pick one and trace its market impact.'
-              : 'Auto-categorized by AI. Pick one and trace its market impact.'}
+              : 'Stored and categorised automatically. Pick one and trace its market impact.'}
           </p>
         </div>
         {/* Refreshing means "fetch and store", which needs both a session and
@@ -165,13 +166,17 @@ export default function Discover() {
         <p className="text-sm text-hold bg-hold-dim border border-hold-dim rounded-lg px-3 py-2 mb-4">
           {backendDown
             ? 'Reading headlines directly from the news feed because the database is unreachable. They are categorised by the offline rule engine and not saved.'
-            : 'Reading headlines directly from the news feed. Sign in to build up a stored, AI-categorised feed.'}
+            : user
+              ? 'Showing headlines straight from the news feed. Press Refresh News to store them in your feed.'
+              : 'Reading headlines directly from the news feed. Sign in to build up a stored, categorised feed.'}
         </p>
       )}
 
       {loadError && (
-        <p className="text-sm text-avoid bg-avoid-dim border border-avoid-dim rounded-lg px-3 py-2 mb-4">
-          {loadError}
+        // The provider's own error text ("fetch failed") is kept for the
+        // tooltip; the sentence says what it means for the reader.
+        <p className="text-sm text-avoid bg-avoid-dim border border-avoid-dim rounded-lg px-3 py-2 mb-4" title={loadError} role="status">
+          The news feed did not answer just now, so there are no headlines to show. Reload to try again.
         </p>
       )}
 
@@ -209,13 +214,19 @@ export default function Discover() {
               Offering "Refresh News" without a session posts to a route that
               answers Unauthorized, which reads as a broken button. */}
           <p className="text-lg mb-2 text-ink">
-            {filter !== 'All' ? `No headlines tagged ${filter} right now` : 'No headlines right now'}
+            {filter !== 'All'
+              ? `No headlines tagged ${filter} right now`
+              : loadError
+                ? 'Headlines could not be fetched'
+                : 'No headlines right now'}
           </p>
           <p className="text-sm mb-6">
             {filter !== 'All'
               ? 'Try the All filter, or reload for a fresh pull.'
-              : live
-                ? 'The news feed returned nothing on the last pull. It refreshes on every load.'
+              : loadError
+                ? 'This is the feed being unreachable, not a quiet news day. Nothing on the page is filled in from elsewhere.'
+                : live
+                  ? 'The news feed returned nothing on the last pull. It refreshes on every load.'
                 : 'Tap Refresh News to fetch and categorize the latest financial headlines.'}
           </p>
           {user && !backendDown && !live ? (
@@ -271,7 +282,7 @@ export default function Discover() {
                     )}
                   </div>
                   <p className="text-[10px] text-ink-faint mt-2 font-mono">
-                    {item.source} &middot; {item.published_at ? new Date(item.published_at).toLocaleDateString() : ''}
+                    {item.source} &middot; {formatRelative(item.published_at)}
                   </p>
                 </div>
                 <button

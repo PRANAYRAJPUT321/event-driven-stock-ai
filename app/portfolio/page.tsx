@@ -7,6 +7,7 @@ import BackendDownNotice from '@/components/BackendDownNotice'
 import AppShell from '@/components/layout/AppShell'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import type { User } from '@supabase/supabase-js'
+import { formatDateIST } from '@/lib/format'
 
 interface Position {
   id: string
@@ -199,7 +200,7 @@ export default function Portfolio() {
                     )}
                   </div>
                   <p className="text-xs text-ink-faint mt-1.5 mono-tabular">
-                    Entry ₹{p.entry_price.toFixed(2)} on {new Date(p.entry_date).toLocaleDateString()}
+                    Entry ₹{p.entry_price.toFixed(2)} on {formatDateIST(Date.parse(p.entry_date))}
                     {p.currentPrice !== null
                       ? ` · Live ₹${p.currentPrice.toFixed(2)}`
                       : ' · live price unavailable'}

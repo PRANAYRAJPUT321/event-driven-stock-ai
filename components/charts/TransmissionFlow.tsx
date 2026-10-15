@@ -25,28 +25,34 @@ const DIRECTION_META: Record<string, { color: string; label: string }> = {
 
 function Node({ title, sub, color, glow, raw }: { title: string; sub: string; color: string; glow?: boolean; raw?: boolean }) {
   return (
-    <div className="flex flex-col items-center text-center w-[104px] flex-shrink-0">
+    <div className="flex sm:flex-col items-center sm:text-center gap-3 sm:gap-0 sm:w-[104px] flex-shrink-0">
       <div
-        className="w-3 h-3 rounded-full mb-2 border-2"
+        className="w-3 h-3 rounded-full sm:mb-2 border-2 flex-shrink-0"
         style={{ background: glow ? color : 'var(--surface)', borderColor: color, boxShadow: glow ? `0 0 12px ${color}` : undefined }}
       />
-      <p className={`text-[11px] font-semibold text-ink leading-tight ${raw ? 'font-mono' : 'capitalize'}`}>
-        {raw ? title : title.toLowerCase()}
-      </p>
-      <p className="text-[9px] text-ink-faint mt-0.5 uppercase tracking-wide">{sub}</p>
+      <div>
+        <p className={`text-[11px] font-semibold text-ink leading-tight ${raw ? 'font-mono' : 'capitalize'}`}>
+          {raw ? title : title.toLowerCase()}
+        </p>
+        <p className="text-[9px] text-ink-faint mt-0.5 uppercase tracking-wide">{sub}</p>
+      </div>
     </div>
   )
 }
 
+/** Horizontal from `sm` up; a short vertical rule on phones, where five nodes do not fit across. */
 function Connector({ color }: { color: string }) {
   return (
-    <div className="flex-1 min-w-[20px] flex items-center px-0.5 -mt-4">
-      <svg width="100%" height="8" viewBox="0 0 100 8" preserveAspectRatio="none" className="w-full overflow-visible">
-        <line x1="0" y1="4" x2="100" y2="4" stroke={color} strokeWidth="2" strokeDasharray="6 6" opacity="0.55">
-          <animate attributeName="stroke-dashoffset" from="24" to="0" dur="1s" repeatCount="indefinite" />
-        </line>
-      </svg>
-    </div>
+    <>
+      <div className="sm:hidden ml-[5px] h-5 border-l-2 border-dashed" style={{ borderColor: color, opacity: 0.55 }} />
+      <div className="hidden sm:flex flex-1 min-w-[20px] items-center px-0.5 mt-[2px]">
+        <svg width="100%" height="8" viewBox="0 0 100 8" preserveAspectRatio="none" className="w-full overflow-visible">
+          <line x1="0" y1="4" x2="100" y2="4" stroke={color} strokeWidth="2" strokeDasharray="6 6" opacity="0.55">
+            <animate attributeName="stroke-dashoffset" from="24" to="0" dur="1s" repeatCount="indefinite" />
+          </line>
+        </svg>
+      </div>
+    </>
   )
 }
 
@@ -81,9 +87,9 @@ export default function TransmissionFlow({
 
   return (
     <div>
-      <div className="flex items-start overflow-x-auto py-2 px-1 -mx-1">
+      <div className="flex flex-col sm:flex-row sm:items-start py-2">
         {steps.map((step, idx) => (
-          <div key={idx} className="flex items-start flex-shrink-0">
+          <div key={idx} className={`flex flex-col sm:flex-row sm:items-start ${idx < steps.length - 1 ? 'sm:flex-1' : ''}`}>
             <Node title={step.title} sub={step.sub} color={meta.color} glow={idx === steps.length - 1} raw={step.raw} />
             {idx < steps.length - 1 && <Connector color={meta.color} />}
           </div>
