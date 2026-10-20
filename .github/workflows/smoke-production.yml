@@ -1,0 +1,33 @@
+# Temporary: checks the deployed site from a cloud runner, because the
+# development sandbox cannot reach vercel.app. Read-only against production.
+name: smoke-production
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/event-driven-stock-ai-tj6oic]
+    paths: [scripts/smoke-production.mjs, scripts/smoke-production-ui.mjs, .github/workflows/smoke-production.yml]
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Endpoints
+        run: node scripts/smoke-production.mjs
+      - name: Pages in Chrome
+        run: |
+          mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i playwright-core@1.48.2 >/dev/null
+          cp "$GITHUB_WORKSPACE/scripts/smoke-production-ui.mjs" /tmp/pw/ui.mjs
+          cd /tmp/pw && node ui.mjs
+          cp -r /tmp/pw/smoke-out/* "$GITHUB_WORKSPACE/smoke-out/"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-out
+          path: smoke-out
+          retention-days: 3
