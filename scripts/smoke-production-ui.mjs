@@ -2,10 +2,12 @@
 // screenshots plus any page errors (see .github/workflows/smoke-production.yml).
 import { chromium } from 'playwright-core'
 import { appendFileSync, mkdirSync } from 'node:fs'
+import sharp from 'sharp'
 
 const BASE = process.env.BASE || 'https://event-driven-stock-ai-wnj4.vercel.app'
 const OUT = 'smoke-out'
 const THUMBS = (process.env.THUMBS || '').split(',').filter(Boolean)
+const thumbs = []
 mkdirSync(OUT, { recursive: true })
 const report = (line) => {
   console.log(line)
@@ -36,8 +38,8 @@ async function visit(name, path, { width = 1440, height = 900, theme = 'dark', a
     // A small JPEG of the first screen, printed into the job log in chunks:
     // the artifact store is not reachable from where these are reviewed.
     if (THUMBS.includes(name)) {
-      const jpeg = (await page.screenshot({ type: 'jpeg', quality: 55 })).toString('base64')
-      for (let i = 0, n = 0; i < jpeg.length; i += 3000, n++) console.log(`IMG ${name} ${n} ${jpeg.slice(i, i + 3000)}`)
+      const png = await page.screenshot()
+      thumbs.push([name, (await sharp(png).resize({ width: 640 }).jpeg({ quality: 45 }).toBuffer()).toString('base64')])
     }
     report(`${name.padEnd(28)} ${path} ${Date.now() - t0}ms overflowX=${overflow}px url=${new URL(page.url()).pathname}`)
   } catch (e) {
@@ -91,3 +93,6 @@ await visit('discover', '/discover')
 await visit('login', '/auth/login', { theme: 'light' })
 
 await browser.close()
+
+// Printed last, after the report, as one line per image.
+for (const [name, b64] of thumbs) console.log(`IMG ${name} ${b64}`)
