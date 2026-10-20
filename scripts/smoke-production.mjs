@@ -30,11 +30,49 @@ const short = (v, n = 220) => JSON.stringify(v)?.slice(0, n)
 
 log(`# Production smoke test — ${BASE} — ${new Date().toISOString()}`)
 
+// Wait for the build under test: renamed symbols chart only from this commit
+// on, so a 200 here means production is serving it rather than the last one.
+if (process.env.WAIT_FOR_DEPLOY) {
+  const deadline = Date.now() + 12 * 60_000
+  for (;;) {
+    const r = await get('/api/stocks/history?symbol=TATAMOTORS&range=1m')
+    if (r.status === 200) {
+      log(`new build is live (TATAMOTORS history → 200)`)
+      break
+    }
+    if (Date.now() > deadline) {
+      log(`NEW BUILD NOT LIVE after 12 minutes (last status ${r.status}) — results below are for the previous build`)
+      break
+    }
+    await new Promise((res) => setTimeout(res, 20_000))
+  }
+}
+
 // ── Health ──
 {
   const r = await get('/api/health')
   log(`\n## /api/health → ${r.status} (${r.ms}ms)`)
   log(short(r.json, 1500))
+  // Whether the database host exists at all: a paused project and a deleted
+  // one look the same from inside the app ("fetch failed").
+  const host = r.json?.supabaseHost
+  if (host) {
+    const { lookup } = await import('node:dns/promises')
+    try {
+      const a = await lookup(host)
+      log(`  DNS ${host} → ${a.address}`)
+    } catch (e) {
+      log(`  DNS ${host} → ${e.code || e.message}`)
+    }
+    for (const path of ['/auth/v1/health', '/rest/v1/']) {
+      try {
+        const res = await fetch(`https://${host}${path}`, { signal: AbortSignal.timeout(15000) })
+        log(`  https://${host}${path} → ${res.status} ${(await res.text()).slice(0, 160).replace(/\s+/g, ' ')}`)
+      } catch (e) {
+        log(`  https://${host}${path} → ${e.cause?.code || e.message}`)
+      }
+    }
+  }
 }
 
 // ── Market bar and heatmaps ──

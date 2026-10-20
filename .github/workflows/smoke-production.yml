@@ -11,7 +11,7 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,11 +19,13 @@ jobs:
           node-version: 20
       - name: Endpoints
         run: node scripts/smoke-production.mjs
+        env:
+          WAIT_FOR_DEPLOY: '1'
       - name: Pages in Chrome
         run: |
           mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i playwright-core@1.48.2 >/dev/null
           cp "$GITHUB_WORKSPACE/scripts/smoke-production-ui.mjs" /tmp/pw/ui.mjs
-          cd /tmp/pw && node ui.mjs
+          cd /tmp/pw && THUMBS=markets-dark,markets-mobile,stock-reliance-1y,stock-reliance-candles,analyze-anonymous,stock-hdfcbank-light node ui.mjs
           cp -r /tmp/pw/smoke-out/* "$GITHUB_WORKSPACE/smoke-out/"
       - uses: actions/upload-artifact@v4
         if: always()

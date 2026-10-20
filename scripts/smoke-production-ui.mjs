@@ -5,6 +5,7 @@ import { appendFileSync, mkdirSync } from 'node:fs'
 
 const BASE = process.env.BASE || 'https://event-driven-stock-ai-wnj4.vercel.app'
 const OUT = 'smoke-out'
+const THUMBS = (process.env.THUMBS || '').split(',').filter(Boolean)
 mkdirSync(OUT, { recursive: true })
 const report = (line) => {
   console.log(line)
@@ -32,6 +33,12 @@ async function visit(name, path, { width = 1440, height = 900, theme = 'dark', a
     if (act) await act(page)
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
     await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: true })
+    // A small JPEG of the first screen, printed into the job log in chunks:
+    // the artifact store is not reachable from where these are reviewed.
+    if (THUMBS.includes(name)) {
+      const jpeg = (await page.screenshot({ type: 'jpeg', quality: 55 })).toString('base64')
+      for (let i = 0, n = 0; i < jpeg.length; i += 3000, n++) console.log(`IMG ${name} ${n} ${jpeg.slice(i, i + 3000)}`)
+    }
     report(`${name.padEnd(28)} ${path} ${Date.now() - t0}ms overflowX=${overflow}px url=${new URL(page.url()).pathname}`)
   } catch (e) {
     report(`${name.padEnd(28)} ${path} FAILED: ${String(e).slice(0, 200)}`)
