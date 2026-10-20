@@ -1,4 +1,4 @@
-import { classifyEventByRules, detectPolarity, type Polarity } from './ruleClassifier'
+import { classifyEventByRules, polarityFor, type Polarity } from './ruleClassifier'
 
 /**
  * Two-sided impact analysis for a news item.
@@ -310,6 +310,38 @@ const CHANNEL_IMPACTS: Record<string, Partial<Record<Polarity, SidedImpact>>> = 
     },
   },
 
+  monsoon: {
+    up: {
+      mechanism:
+        'A good monsoon raises farm output and rural incomes, and rural India buys roughly half of the country’s consumer staples and two-wheelers.',
+      positives: [
+        { text: 'Rural volumes for soaps, biscuits, tea and other staples recover with farm incomes, and rural is the slower-growing half of the market.', sectors: ['FMCG'] },
+        { text: 'Tractor and two-wheeler demand tracks the harvest closely, so order books fill ahead of the festive season.', sectors: ['Auto'] },
+        { text: 'More disposable income in rural households lifts discretionary purchases such as paint, jewellery and appliances.', sectors: ['Consumer'] },
+        { text: 'Ample food supply cools inflation, which leaves room for lower interest rates.', sectors: ['Banking', 'Financials'] },
+        { text: 'Rural borrowers repay more reliably after a good harvest, improving microfinance and farm-loan asset quality.', sectors: ['Banking', 'Financials'] },
+      ],
+      negatives: [
+        { text: 'How the rain is spread across regions and weeks matters as much as the seasonal total; a good average can hide local deficits.', sectors: [] },
+        { text: 'Cheaper agricultural raw materials lower realisations for companies that sell them.', sectors: ['FMCG'] },
+      ],
+    },
+    down: {
+      mechanism:
+        'A weak monsoon cuts farm output and rural incomes, and lifts food prices for everyone.',
+      positives: [
+        { text: 'Companies with strong brands can pass on higher food and input costs, protecting margin even as volumes slow.', sectors: ['FMCG'] },
+      ],
+      negatives: [
+        { text: 'Rural demand for staples weakens with farm incomes, hitting volume growth.', sectors: ['FMCG'] },
+        { text: 'Tractor and entry-level two-wheeler sales fall with the harvest.', sectors: ['Auto'] },
+        { text: 'Discretionary purchases are deferred in rural households.', sectors: ['Consumer'] },
+        { text: 'Higher food inflation delays rate cuts and strains rural loan repayment.', sectors: ['Banking', 'Financials'] },
+        { text: 'A demand slowdown in rural India reaches the wider economy within a few quarters.', sectors: [] },
+      ],
+    },
+  },
+
   earnings: {
     up: {
       mechanism: 'Reported results and guidance reset the forward estimates the market capitalises.',
@@ -352,15 +384,17 @@ function balanceOf(positives: ImpactPoint[], negatives: ImpactPoint[]): number {
   return up + down === 0 ? 0 : (up - down) / (up + down)
 }
 
-function resolveDirection(positives: string[], negatives: string[]): ImpactDirection {
+function resolveDirection(positives: ImpactPoint[], negatives: ImpactPoint[]): ImpactDirection {
   if (positives.length === 0 && negatives.length === 0) return 'NEUTRAL'
   if (positives.length === 0) return 'NEGATIVE'
   if (negatives.length === 0) return 'POSITIVE'
   // Both sides present: a clear majority decides, otherwise it is genuinely
-  // mixed and saying so is more useful than picking one.
-  const ratio = positives.length / (positives.length + negatives.length)
-  if (ratio >= 0.67) return 'POSITIVE'
-  if (ratio <= 0.33) return 'NEGATIVE'
+  // mixed and saying so is more useful than picking one. Weighted like the
+  // score (broad points count half), so a label never contradicts its number:
+  // one direct benefit against one market-wide caveat is a benefit, not a tie.
+  const ratio = weight(positives) / (weight(positives) + weight(negatives))
+  if (ratio > 0.6) return 'POSITIVE'
+  if (ratio < 0.4) return 'NEGATIVE'
   return 'MIXED'
 }
 
@@ -398,7 +432,7 @@ export function analyseImpact(request: ImpactRequest): ImpactAnalysis {
   // rising is a NEGATIVE market direction — so deriving polarity from
   // classification.direction selected the wrong side of every inverse channel.
   // Detect the variable's own direction from the text instead.
-  const polarity: Polarity = detectPolarity(text.toLowerCase())
+  const polarity: Polarity = polarityFor(text)
 
   const channel = themeId ? CHANNEL_IMPACTS[themeId] : undefined
   // Some channels are written from the variable's direction and some are
@@ -440,7 +474,7 @@ export function analyseImpact(request: ImpactRequest): ImpactAnalysis {
     const down = applicable(sided.negatives, sector)
     const positives = up.map((p) => p.text)
     const negatives = down.map((p) => p.text)
-    const direction = resolveDirection(positives, negatives)
+    const direction = resolveDirection(up, down)
     return {
       entity,
       kind,
@@ -491,6 +525,7 @@ const THEME_BY_EVENT_TYPE: Record<string, string> = {
   REGULATORY: 'regulatory',
   GEOPOLITICAL: 'geopolitical',
   EARNINGS: 'earnings',
+  AGRICULTURE: 'monsoon',
 }
 
 /**

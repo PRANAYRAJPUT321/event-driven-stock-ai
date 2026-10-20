@@ -413,7 +413,10 @@ export default function EventDetails({ params }: { params: { id: string } }) {
       <ImpactBreakdown
         title={analysis.event_title}
         sectors={analysis.affected_sectors || []}
-        companies={stocks.slice(0, 6).map((stock) => ({ symbol: stock.stock_symbol }))}
+        companies={stocks.slice(0, 6).map((stock) => ({
+          symbol: stock.stock_symbol,
+          name: findEquity(stock.stock_symbol)?.name,
+        }))}
       />
 
       {/* Global Market Context */}
@@ -456,7 +459,12 @@ export default function EventDetails({ params }: { params: { id: string } }) {
           actually being published about those sectors and companies. */}
       <NewsImpactPanel
         sectors={analysis.affected_sectors || []}
-        companies={stocks.slice(0, 3).map((stock) => ({ symbol: stock.stock_symbol }))}
+        // Named, so the headline search looks for "Oil & Natural Gas
+        // Corporation" rather than the bare ticker.
+        companies={stocks.slice(0, 3).map((stock) => ({
+          symbol: stock.stock_symbol,
+          name: findEquity(stock.stock_symbol)?.name,
+        }))}
       />
 
       {/* Historical Event Evidence */}

@@ -9,6 +9,7 @@
 //   const { respond } = require('./replay.cjs')            (tests)
 const fs = require('fs')
 const path = require('path')
+const crypto = require('crypto')
 
 const dir = __dirname
 const load = (name) => JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'))
@@ -39,6 +40,29 @@ for (const market of Object.values(tvTickers)) {
     tickerColumns.forEach((c, i) => (rec[c] = d.d[i]))
     rows.set(d.s, rec)
   }
+}
+
+// Exact responses recorded from the live providers for a specific run of the
+// app (see record-requests.mjs): served before anything above, keyed by
+// request. Absent until recorded.
+const recordingsFile = path.join(dir, 'http-recordings.json')
+const recordings = new Map(
+  fs.existsSync(recordingsFile)
+    ? JSON.parse(fs.readFileSync(recordingsFile, 'utf8')).entries.map((e) => [e.key, e])
+    : []
+)
+
+/**
+ * The identity of a request for matching against a recording. Upstox history
+ * URLs carry today's date range, so they match on instrument, unit and
+ * interval; a POST also matches on its body.
+ */
+function requestKey(method, url, body) {
+  let u = url
+  const m = url.match(/^(https:\/\/api\.upstox\.com\/v3\/historical-candle\/(?!intraday)[^/]+\/\w+\/\d+)\/[\d-]+\/[\d-]+/)
+  if (m) u = m[1]
+  const hash = body ? crypto.createHash('sha1').update(String(body)).digest('hex').slice(0, 16) : ''
+  return `${(method || 'GET').toUpperCase()} ${u}${hash ? ' #' + hash : ''}`
 }
 
 const json = (body, status = 200) =>
@@ -89,17 +113,37 @@ const HOSTS = new Set(['scanner.tradingview.com', 'api.upstox.com', 'priceapi.mo
 // fallback chain from waiting out timeouts.
 const REFUSE = /(^|\.)(yahoo\.com|stooq\.com|nseindia\.com|bseindia\.com|frankfurter\.app|coingecko\.com|news\.google\.com)$/
 
+// Never logged: credentials travel to these, and they are not market data.
+const PRIVATE = /(^|\.)(supabase\.co|anthropic\.com|localhost|127\.0\.0\.1)$/
+
 function install() {
   const realFetch = globalThis.fetch
+  const logFile = process.env.REPLAY_LOG
   globalThis.fetch = async (input, init) => {
     const url = typeof input === 'string' ? input : input?.url || String(input)
     let host = ''
     try { host = new URL(url).hostname } catch {}
+    const method = (init?.method || 'GET').toUpperCase()
+    const body = typeof init?.body === 'string' ? init.body : undefined
+    if (logFile && host && !PRIVATE.test(host)) {
+      const headers = {}
+      new Headers(init?.headers || {}).forEach((v, k) => {
+        if (!/authorization|cookie|api-key|apikey|token/i.test(k)) headers[k] = v
+      })
+      fs.appendFileSync(logFile, JSON.stringify({ method, url, headers, body }) + '\n')
+    }
+    const recorded = recordings.get(requestKey(method, url, body))
+    if (recorded) {
+      return new Response(recorded.body, {
+        status: recorded.status,
+        headers: { 'content-type': recorded.contentType || 'application/octet-stream' },
+      })
+    }
     if (HOSTS.has(host)) return respond(url, init || {})
     if (REFUSE.test(host)) throw new TypeError(`fetch failed (replay: ${host} not recorded)`)
     return realFetch(input, init)
   }
 }
 
-module.exports = { respond, install, rows }
+module.exports = { respond, install, rows, requestKey, recordings }
 if (require.main !== module && process.env.MARKET_REPLAY !== '0') install()

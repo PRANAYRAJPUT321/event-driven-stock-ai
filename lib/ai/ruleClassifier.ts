@@ -49,6 +49,12 @@ interface Theme {
     sectors: Sector[]
     mechanism: string
   }
+  /**
+   * For channels whose direction is not said with "rises"/"falls" — a
+   * monsoon forecast is "at 105% of the long-period average" — the theme
+   * reads it itself. null falls back to the generic up/down words.
+   */
+  polarity?: (text: string) => Polarity | null
 }
 
 const UP_WORDS = [
@@ -133,6 +139,39 @@ const THEMES: Theme[] = [
             sectors: ['FMCG', 'Consumer', 'Retail', 'Banking'],
             mechanism:
               'Cooling inflation restores household purchasing power and eases input-cost pressure, so consumer volumes and gross margins both improve. It also opens the door to easier monetary policy, which helps lenders and rate-sensitive demand.',
+          },
+  },
+  {
+    id: 'monsoon',
+    eventType: 'AGRICULTURE',
+    economicVariable: 'RAINFALL',
+    keywords: [
+      'monsoon', 'rainfall', 'long-period average', 'long period average', 'lpa', 'imd',
+      'kharif', 'rabi', 'sowing', 'drought', 'el nino', 'la nina',
+    ],
+    baseMagnitude: 55,
+    // IMD's own bands: below 96% of the long-period average is below normal
+    // or deficient; 96% and above is normal or better.
+    polarity: (text) => {
+      const pct = text.match(/(\d{2,3}(?:\.\d+)?)\s*(?:%|per ?cent)\s*(?:of\s*(?:the\s*)?)?(?:long[- ]period average|lpa)/)
+      if (pct) return Number(pct[1]) >= 96 ? 'up' : 'down'
+      if (/deficien|below[- ]normal|deficit|drought|delayed|weak monsoon|erratic|dry spell|el nino|failed monsoon/.test(text)) return 'down'
+      if (/above[- ]normal|surplus|excess|normal monsoon|good monsoon|bountiful|la nina|early onset|healthy/.test(text)) return 'up'
+      return null
+    },
+    resolve: (polarity) =>
+      polarity === 'down'
+        ? {
+            direction: 'NEGATIVE',
+            sectors: ['FMCG', 'Auto', 'Consumer'],
+            mechanism:
+              'A weak monsoon cuts farm output and rural incomes, so demand for everyday consumer goods, two-wheelers and tractors softens where half of India’s consumption happens. Food prices rise, which keeps inflation up and delays rate cuts.',
+          }
+        : {
+            direction: 'POSITIVE',
+            sectors: ['FMCG', 'Auto', 'Consumer'],
+            mechanism:
+              'A good monsoon lifts farm output and rural incomes, which drive demand for everyday consumer goods, two-wheelers and tractors. Ample food supply also cools inflation, leaving room for lower interest rates.',
           },
   },
   {
@@ -445,6 +484,15 @@ function firstMatchIndex(haystack: string, needles: string[]): number {
   return earliest
 }
 
+/**
+ * Which way the event's underlying variable moved, using the matched
+ * channel's own reading where it has one (see Theme.polarity).
+ */
+export function polarityFor(text: string): Polarity {
+  const lower = text.toLowerCase()
+  return bestTheme(lower)?.theme.polarity?.(lower) ?? detectPolarity(lower)
+}
+
 export function detectPolarity(text: string): Polarity {
   // "Held unchanged" beats any incidental up/down word in the same sentence.
   if (countMatches(text, HOLD_WORDS) > 0 && countMatches(text, ['hike', 'cut', 'raise']) === 0) {
@@ -494,7 +542,7 @@ function hasFigure(text: string): boolean {
 export function classifyEventByRules(eventText: string): EventClassification {
   const text = eventText.toLowerCase()
   const match = bestTheme(text)
-  const polarity = detectPolarity(text)
+  const polarity = match?.theme.polarity?.(text) ?? detectPolarity(text)
   const mentionedSectors = detectSectors(text)
 
   const intensity = countMatches(text, INTENSITY_WORDS)

@@ -323,7 +323,11 @@ const energyUp = crudeUpImpact.sectorImpacts.find((s) => s.entity === 'Energy')
 check('crude spike hurts airlines', aviationUp.direction, 'NEGATIVE')
 checkThat('crude spike names fuel cost as the mechanism',
   aviationUp.negatives.some((t) => /fuel/i.test(t)), JSON.stringify(aviationUp.negatives))
-check('crude spike is two-sided for energy', energyUp.direction, 'MIXED')
+// Two direct benefits (upstream realisations, refining inventory gains)
+// against one market-wide caveat (the current account): a benefit, with the
+// caveat still listed on the negative side.
+check('crude spike helps energy on balance', energyUp.direction, 'POSITIVE')
+checkThat('crude spike still lists the caveat for energy', energyUp.negatives.length > 0)
 checkThat('crude spike helps upstream producers',
   energyUp.positives.some((t) => /upstream|higher price/i.test(t)), JSON.stringify(energyUp.positives))
 
@@ -384,6 +388,32 @@ checkThat('rate cut names the treasury gain on bond holdings',
   JSON.stringify(withCompanies.companyImpacts[0].positives))
 checkThat('rate hike names the treasury loss on bond holdings',
   banking.negatives.some((t) => /treasury losses/i.test(t)), JSON.stringify(banking.negatives))
+
+section('monsoon channel')
+
+// The analyse page offers this example; it used to match no channel and come
+// back OTHER / NEUTRAL against a catch-all "Diversified" sector.
+const goodRain = classifyEventByRules('Monsoon rainfall forecast at 105% of the long-period average')
+check('a monsoon forecast is recognised', goodRain.event_type, 'AGRICULTURE')
+check('105% of the LPA reads as positive', goodRain.direction, 'POSITIVE')
+checkThat('a good monsoon reaches rural-demand sectors',
+  ['FMCG', 'Auto', 'Consumer'].every((x) => goodRain.affected_sectors.includes(x)), JSON.stringify(goodRain.affected_sectors))
+check('92% of the LPA reads as negative',
+  classifyEventByRules('IMD forecasts monsoon at 92% of the long period average').direction, 'NEGATIVE')
+check('a deficient monsoon reads as negative',
+  classifyEventByRules('Deficient monsoon: rainfall 18% below normal in August').direction, 'NEGATIVE')
+check('a monsoon with no direction stays neutral',
+  classifyEventByRules('IMD to release its monsoon forecast next week').direction, 'NEUTRAL')
+const rainImpact = analyseImpact({
+  title: 'Monsoon rainfall forecast at 105% of the long-period average',
+  sectors: ['FMCG', 'Auto'],
+  companies: [{ symbol: 'M&M', name: 'Mahindra & Mahindra', sector: 'Auto' }],
+})
+check('a good monsoon helps autos', rainImpact.sectorImpacts.find((x) => x.entity === 'Auto').direction, 'POSITIVE')
+checkThat('the tractor channel is named',
+  rainImpact.companyImpacts[0].positives.some((t) => /tractor/i.test(t)), JSON.stringify(rainImpact.companyImpacts[0].positives))
+check('"Saudi Arabia" does not trigger the rabi crop keyword',
+  classifyEventByRules('Saudi Arabia raises crude output').event_type, 'COMMODITY_SHOCK')
 
 section('per-company event impact score')
 
