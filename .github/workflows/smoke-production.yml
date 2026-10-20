@@ -5,9 +5,10 @@ on:
   workflow_dispatch:
   push:
     branches: [claude/event-driven-stock-ai-tj6oic]
-    paths: [scripts/smoke-production.mjs, scripts/smoke-production-ui.mjs, .github/workflows/smoke-production.yml]
+    paths: [scripts/smoke-production.mjs, scripts/smoke-production-ui.mjs, scripts/smoke-post-checks.mjs, .github/workflows/smoke-production.yml]
 permissions:
   contents: read
+  checks: write
 jobs:
   smoke:
     runs-on: ubuntu-latest
@@ -25,8 +26,13 @@ jobs:
         run: |
           mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i playwright-core@1.48.2 sharp@0.33.5 >/dev/null
           cp "$GITHUB_WORKSPACE/scripts/smoke-production-ui.mjs" /tmp/pw/ui.mjs
-          cd /tmp/pw && THUMBS=markets-dark,stock-reliance-1y,analyze-anonymous node ui.mjs
+          cd /tmp/pw && THUMBS=markets-dark,markets-light,markets-mobile,stock-reliance-1y,stock-reliance-1d,stock-reliance-candles,stock-hdfcbank-light,stock-tmpv-mobile,search-palette,analyze-anonymous,discover,login node ui.mjs
           cp -r /tmp/pw/smoke-out/* "$GITHUB_WORKSPACE/smoke-out/"
+      - name: Post report and thumbnails as check runs
+        if: always()
+        run: node scripts/smoke-post-checks.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:

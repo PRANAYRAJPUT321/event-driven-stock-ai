@@ -1,13 +1,12 @@
 // Temporary: drives the deployed site in Chrome from a cloud runner and saves
 // screenshots plus any page errors (see .github/workflows/smoke-production.yml).
 import { chromium } from 'playwright-core'
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import sharp from 'sharp'
 
 const BASE = process.env.BASE || 'https://event-driven-stock-ai-wnj4.vercel.app'
 const OUT = 'smoke-out'
 const THUMBS = (process.env.THUMBS || '').split(',').filter(Boolean)
-const thumbs = []
 mkdirSync(OUT, { recursive: true })
 const report = (line) => {
   console.log(line)
@@ -38,8 +37,14 @@ async function visit(name, path, { width = 1440, height = 900, theme = 'dark', a
     // A small JPEG of the first screen, printed into the job log in chunks:
     // the artifact store is not reachable from where these are reviewed.
     if (THUMBS.includes(name)) {
+      // Small enough to travel as a check run's text (64 KB limit).
       const png = await page.screenshot()
-      thumbs.push([name, (await sharp(png).resize({ width: 640 }).jpeg({ quality: 45 }).toBuffer()).toString('base64')])
+      let b64 = ''
+      for (const quality of [50, 40, 30, 20]) {
+        b64 = (await sharp(png).resize({ width: 720, withoutEnlargement: true }).jpeg({ quality }).toBuffer()).toString('base64')
+        if (b64.length < 60000) break
+      }
+      writeFileSync(`${OUT}/thumb-${name}.b64`, b64)
     }
     report(`${name.padEnd(28)} ${path} ${Date.now() - t0}ms overflowX=${overflow}px url=${new URL(page.url()).pathname}`)
   } catch (e) {
@@ -93,6 +98,3 @@ await visit('discover', '/discover')
 await visit('login', '/auth/login', { theme: 'light' })
 
 await browser.close()
-
-// Printed last, after the report, as one line per image.
-for (const [name, b64] of thumbs) console.log(`IMG ${name} ${b64}`)
