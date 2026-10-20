@@ -8,7 +8,8 @@ import AppShell from '@/components/layout/AppShell'
 import Sparkline from '@/components/charts/Sparkline'
 import MarketTreemap from '@/components/charts/MarketTreemap'
 import HeatLegend from '@/components/charts/HeatLegend'
-import { formatINRCompact, formatPct, formatPrice, nseSessionState } from '@/lib/format'
+import { formatINRCompact, formatPct, formatPrice } from '@/lib/format'
+import { useNseSession } from '@/lib/useNseSession'
 import { heatColor, heatInk, heatStep, type HeatScale } from '@/lib/heat'
 import type { MarketQuote } from '@/lib/market/types'
 import type { User } from '@supabase/supabase-js'
@@ -311,7 +312,7 @@ export default function Markets() {
     .map((s) => quotes.find((q) => q.symbol === s))
     .filter((q): q is MarketQuote => !!q)
 
-  const session = nseSessionState()
+  const session = useNseSession()
 
   return (
     <AppShell userEmail={user?.email} onLogout={user ? handleLogout : undefined}>
@@ -326,8 +327,8 @@ export default function Markets() {
         </div>
         <div className="flex flex-col items-start md:items-end gap-1 text-[11px] font-mono text-ink-faint flex-shrink-0">
           <span className="flex items-center gap-2">
-            {session.open && <span className="live-dot" aria-hidden="true" />}
-            {session.label}
+            {session?.open && <span className="live-dot" aria-hidden="true" />}
+            {session?.label}
             {fetchedAt &&
               ` · updated ${new Date(fetchedAt).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false })} IST`}
           </span>

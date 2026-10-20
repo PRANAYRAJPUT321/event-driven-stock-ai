@@ -10,7 +10,8 @@ import AppShell from '@/components/layout/AppShell'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import ScoreChip from '@/components/ui/ScoreChip'
 import Sparkline from '@/components/charts/Sparkline'
-import { formatPct, formatPrice, formatRelative, nseSessionState } from '@/lib/format'
+import { formatPct, formatPrice, formatRelative } from '@/lib/format'
+import { useNseSession } from '@/lib/useNseSession'
 import { heatColor, heatInk, type HeatStep } from '@/lib/heat'
 import type { MarketQuote } from '@/lib/market/types'
 
@@ -218,7 +219,11 @@ export default function Dashboard() {
     router.push('/auth/login')
   }
 
-  const session = nseSessionState()
+  const session = useNseSession()
+  // The greeting depends on the visitor's clock, and this page is prerendered
+  // at build time, so it is set after mount rather than during render.
+  const [hello, setHello] = useState('Hello')
+  useEffect(() => setHello(greeting()), [])
   const name = useMemo(() => {
     // The first name from the profile (set at signup or in Settings), then
     // the email's local part as a fallback.
@@ -253,11 +258,11 @@ export default function Dashboard() {
         <div className="relative grid lg:grid-cols-[1fr_minmax(0,460px)] gap-6 items-center">
           <div>
             <p className="eyebrow mb-2 flex items-center gap-2">
-              {session.open && <span className="live-dot" aria-hidden="true" />}
-              {session.label}
+              {session?.open && <span className="live-dot" aria-hidden="true" />}
+              {session?.label}
             </p>
             <h1 className="text-3xl sm:text-4xl font-bold text-ink tracking-tight">
-              {greeting()}
+              {hello}
               {name ? `, ${name}` : ''}
             </h1>
             <p className="text-ink-muted text-sm mt-2 max-w-lg">

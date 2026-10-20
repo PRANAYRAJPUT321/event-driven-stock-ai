@@ -20,8 +20,8 @@ import {
   formatPrice,
   formatRatio,
   formatRelative,
-  nseSessionState,
 } from '@/lib/format'
+import { useNseSession } from '@/lib/useNseSession'
 import type { StockProfile } from '@/lib/market/stockProfile'
 import { RENAMED_SYMBOLS } from '@/lib/market/indianEquities'
 import type { User } from '@supabase/supabase-js'
@@ -356,7 +356,7 @@ export default function StockProfilePage({ params }: { params: { symbol: string 
   // memory belongs to a different range and must not be shown as this one.
   const rangeFailed = Boolean(historyError) && !historyLoading && (!history || history.range !== range)
 
-  const session = nseSessionState()
+  const session = useNseSession()
   const up = (profile?.changePct ?? 0) >= 0
   const canCandle = history?.ohlc !== false
   const maAvailable = history && !history.intraday
@@ -457,8 +457,8 @@ export default function StockProfilePage({ params }: { params: { symbol: string 
                   <span className="text-ink-faint font-normal text-sm">today</span>
                 </p>
                 <p className="text-[11px] text-ink-faint mt-1.5 flex items-center gap-1.5">
-                  {session.open && <span className="live-dot" aria-hidden="true" />}
-                  {session.label} · via {SOURCE_NAMES[profile.source] ?? profile.source}
+                  {session?.open && <span className="live-dot" aria-hidden="true" />}
+                  {session?.label} · via {SOURCE_NAMES[profile.source] ?? profile.source}
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 flex-1 max-w-2xl">

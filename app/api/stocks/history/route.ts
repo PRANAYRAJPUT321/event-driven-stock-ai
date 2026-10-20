@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { CHART_RANGES, fetchPriceHistory, type ChartRange } from '@/lib/market/priceHistory'
 import { deriveStats } from '@/lib/market/yahooStock'
+import { RENAMED_SYMBOLS } from '@/lib/market/indianEquities'
 
 /**
  * OHLCV history for one NSE stock or Indian index over a chart range
@@ -36,8 +37,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: `Invalid symbol '${symbol}'` }, { status: 400 })
   }
 
+  // An old symbol (TATAMOTORS, ZOMATO) charts as the one it trades under now,
+  // as the quote route already does — the page requests both in parallel.
+  const tradedAs = RENAMED_SYMBOLS[symbol.toUpperCase()]?.to ?? symbol
+
   try {
-    const history = await fetchPriceHistory(symbol, range)
+    const history = await fetchPriceHistory(tradedAs, range)
     const points = history.candles.map((c) => ({ date: new Date(c.t).toISOString().slice(0, 10), close: c.c }))
     return NextResponse.json(
       { ...history, stats: deriveStats(points) },
