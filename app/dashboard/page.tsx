@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { createClient, getSessionUser } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase/client'
+import { db, getAppSession, isGuestMode } from '@/lib/appSession'
 import BackendDownNotice from '@/components/BackendDownNotice'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -107,25 +108,17 @@ export default function Dashboard() {
 
   useEffect(() => {
     const getUser = async () => {
-      const { user: sessionUser, backendDown: down } = await getSessionUser()
-      if (down) {
-        setBackendDown(true)
-        return
-      }
-      if (!sessionUser) {
-        router.push('/auth/login')
-        return
-      }
+      const { user: sessionUser } = await getAppSession()
       setUser(sessionUser)
 
-      const { data } = await supabase
+      const { data } = await db()
         .from('event_analysis')
         .select('id, event_title, recommendation, opportunity_score, affected_sectors, created_at')
         .eq('user_id', sessionUser.id)
         .order('created_at', { ascending: false })
         .limit(100)
 
-      const all = data || []
+      const all: (RecentAnalysis & { affected_sectors?: string[] | null })[] = data || []
       setRecent(all.slice(0, 6))
 
       const buy = all.filter((r) => r.recommendation === 'BUY').length
@@ -157,8 +150,8 @@ export default function Dashboard() {
       // Watchlist snapshot and the paper portfolio's track record, both
       // marked to live prices in one request.
       const [{ data: watched }, { data: positions }] = await Promise.all([
-        supabase.from('watchlists').select('stocks(symbol, name)').eq('user_id', sessionUser.id).limit(6),
-        supabase.from('portfolio_positions').select('symbol, recommendation, entry_price').eq('user_id', sessionUser.id),
+        db().from('watchlists').select('stocks(symbol, name)').eq('user_id', sessionUser.id).limit(6),
+        db().from('portfolio_positions').select('symbol, recommendation, entry_price').eq('user_id', sessionUser.id),
       ])
       const watchedStocks = (watched || [])
         .map((w: any) => w.stocks)

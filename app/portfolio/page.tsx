@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient, getSessionUser } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase/client'
+import { db, getAppSession, isGuestMode } from '@/lib/appSession'
 import BackendDownNotice from '@/components/BackendDownNotice'
 import AppShell from '@/components/layout/AppShell'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
@@ -39,19 +40,10 @@ export default function Portfolio() {
 
   async function loadPositions() {
     setLoading(true)
-    const { user, backendDown: down } = await getSessionUser()
-    if (down) {
-      setBackendDown(true)
-      setLoading(false)
-      return
-    }
-    if (!user) {
-      router.push('/auth/login')
-      return
-    }
+    const { user } = await getAppSession()
     setUser(user)
 
-    const { data } = await supabase
+    const { data } = await db()
       .from('portfolio_positions')
       .select('id, symbol, recommendation, entry_price, entry_date, event_analysis_id')
       .eq('user_id', user.id)
@@ -92,7 +84,7 @@ export default function Portfolio() {
 
   async function handleRemove(id: string) {
     setRemovingId(id)
-    const { error } = await supabase.from('portfolio_positions').delete().eq('id', id)
+    const { error } = await db().from('portfolio_positions').delete().eq('id', id)
     if (!error) setPositions((prev) => prev.filter((p) => p.id !== id))
     setRemovingId(null)
   }

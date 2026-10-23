@@ -3,7 +3,8 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient, getSessionUser } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase/client'
+import { getAppSession } from '@/lib/appSession'
 import AppShell from '@/components/layout/AppShell'
 import Sparkline from '@/components/charts/Sparkline'
 import MarketTreemap from '@/components/charts/MarketTreemap'
@@ -173,7 +174,7 @@ export default function Markets() {
     async function init() {
       // No auth guard: every tab comes from keyless public feeds, so this page
       // stays usable signed out and while the database is unreachable.
-      const { user } = await getSessionUser()
+      const { user } = await getAppSession()
       if (active) setUser(user)
       await load(active)
     }

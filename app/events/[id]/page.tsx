@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { createClient, getSessionUser } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase/client'
+import { db, getAppSession, isGuestMode } from '@/lib/appSession'
+import { saveGuestAnalysis } from '@/lib/guestDb'
 import BackendDownNotice from '@/components/BackendDownNotice'
 import { useRouter } from 'next/navigation'
 import AppShell from '@/components/layout/AppShell'
@@ -127,6 +129,10 @@ export default function EventDetails({ params }: { params: { id: string } }) {
         router.push(`/events/${data.analysisId}`)
         return
       }
+      if (isGuestMode() && data.result) {
+        router.push(`/events/${await saveGuestAnalysis(data.result)}`)
+        return
+      }
       throw new Error(data.persistError || 'The new analysis could not be saved')
     } catch (err: any) {
       setRescoreError(err?.message || 'Re-scoring failed')
@@ -137,20 +143,11 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   useEffect(() => {
     const fetchAnalysis = async () => {
       try {
-        const { user, backendDown: down } = await getSessionUser()
-        if (down) {
-          setBackendDown(true)
-          setLoading(false)
-          return
-        }
-        if (!user) {
-          router.push('/auth/login')
-          return
-        }
+        const { user } = await getAppSession()
         setUserId(user.id)
         setUser(user)
 
-        const { data: analysisData } = await supabase
+        const { data: analysisData } = await db()
           .from('event_analysis')
           .select('*')
           .eq('id', params.id)
@@ -160,20 +157,20 @@ export default function EventDetails({ params }: { params: { id: string } }) {
           setAnalysis(analysisData)
 
           const [{ data: stockData }, { data: savedRow }, { data: watchRows }, { data: positionRows }] = await Promise.all([
-            supabase
+            db()
               .from('stock_scores')
               .select('*')
               .eq('event_analysis_id', params.id)
               .order('opportunity_score', { ascending: false })
               .limit(10),
-            supabase
+            db()
               .from('saved_analyses')
               .select('id')
               .eq('event_analysis_id', params.id)
               .eq('user_id', user.id)
               .maybeSingle(),
-            supabase.from('watchlists').select('stock_id').eq('user_id', user.id),
-            supabase
+            db().from('watchlists').select('stock_id').eq('user_id', user.id),
+            db()
               .from('portfolio_positions')
               .select('stock_scores_id')
               .eq('event_analysis_id', params.id)
@@ -224,7 +221,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   async function handleSaveAnalysis() {
     if (!userId || !analysis || saved) return
     setSaving(true)
-    const { error } = await supabase.from('saved_analyses').insert({
+    const { error } = await db().from('saved_analyses').insert({
       user_id: userId,
       event_analysis_id: analysis.id,
       title: analysis.event_title,
@@ -244,7 +241,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
       return
     }
     setWatchingId(stockId)
-    const { error } = await supabase.from('watchlists').insert({ user_id: userId, stock_id: stockId })
+    const { error } = await db().from('watchlists').insert({ user_id: userId, stock_id: stockId })
     // Say why it failed rather than leaving the button looking inert.
     if (error) setWatchError(error.message)
     else {
@@ -280,7 +277,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
       )
       return
     }
-    const { error } = await supabase.from('portfolio_positions').insert({
+    const { error } = await db().from('portfolio_positions').insert({
       user_id: userId,
       stock_scores_id: stock.id,
       event_analysis_id: analysis.id,

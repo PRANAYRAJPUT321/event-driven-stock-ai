@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient, getSessionUser } from '@/lib/supabase/client'
+import { db, getAppSession } from '@/lib/appSession'
 
 /**
  * The app-wide search: every NSE-listed company (by symbol or name), the
@@ -170,9 +170,9 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
     let cancelled = false
     const timer = setTimeout(async () => {
       try {
-        const { user } = await getSessionUser()
+        const { user } = await getAppSession()
         if (!user || cancelled) return
-        const { data } = await createClient()
+        const { data } = await db()
           .from('event_analysis')
           .select('id, event_title, recommendation, created_at')
           .ilike('event_title', `%${q.replace(/[%_]/g, '')}%`)

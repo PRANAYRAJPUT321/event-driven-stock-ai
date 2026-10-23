@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient, getSessionUser } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase/client'
+import { db, getAppSession, isGuestMode } from '@/lib/appSession'
 import BackendDownNotice from '@/components/BackendDownNotice'
 import AppShell from '@/components/layout/AppShell'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
@@ -32,19 +33,10 @@ export default function History() {
 
   useEffect(() => {
     const load = async () => {
-      const { user, backendDown: down } = await getSessionUser()
-      if (down) {
-        setBackendDown(true)
-        setLoading(false)
-        return
-      }
-      if (!user) {
-        router.push('/auth/login')
-        return
-      }
+      const { user } = await getAppSession()
       setUser(user)
 
-      const { data, error } = await supabase
+      const { data, error } = await db()
         .from('event_analysis')
         .select('id, event_title, recommendation, opportunity_score, affected_sectors, created_at')
         .eq('user_id', user.id)

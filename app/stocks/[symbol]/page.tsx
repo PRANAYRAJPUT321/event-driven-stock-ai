@@ -3,7 +3,8 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient, getSessionUser } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase/client'
+import { db, getAppSession, isGuestMode } from '@/lib/appSession'
 import AppShell from '@/components/layout/AppShell'
 import PriceChart, { PriceTable, type ChartCandle, type ChartMode } from '@/components/charts/PriceChart'
 import Sparkline from '@/components/charts/Sparkline'
@@ -160,7 +161,7 @@ export default function StockProfilePage({ params }: { params: { symbol: string 
 
     async function load() {
       const [{ user }, response] = await Promise.all([
-        getSessionUser(),
+        getAppSession(),
         fetch(`/api/stocks/quote?symbol=${encodeURIComponent(symbol)}`).catch(() => null),
       ])
       if (!active) return
@@ -191,11 +192,11 @@ export default function StockProfilePage({ params }: { params: { symbol: string 
 
       if (user) {
         try {
-          const { data: row } = await supabase.from('stocks').select('id').eq('symbol', p.symbol).maybeSingle()
+          const { data: row } = await db().from('stocks').select('id').eq('symbol', p.symbol).maybeSingle()
           if (!active) return
           setStockId(row?.id ?? null)
           if (row?.id) {
-            const { data: w } = await supabase
+            const { data: w } = await db()
               .from('watchlists')
               .select('id')
               .eq('user_id', user.id)
@@ -287,6 +288,12 @@ export default function StockProfilePage({ params }: { params: { symbol: string 
     setWatchError(null)
     try {
       let id = stockId
+      if (!id && isGuestMode()) {
+        // Guest watchlists key stocks by symbol: any NSE company can be added.
+        await db().from('stocks').insert({ id: profile.symbol, symbol: profile.symbol, name: profile.name, sector: profile.sector ?? null })
+        id = profile.symbol
+        setStockId(id)
+      }
       if (!id) {
         const response = await fetch('/api/stocks/ensure', {
           method: 'POST',
@@ -299,11 +306,11 @@ export default function StockProfilePage({ params }: { params: { symbol: string 
         setStockId(id)
       }
       if (watched) {
-        const { error } = await supabase.from('watchlists').delete().eq('user_id', user.id).eq('stock_id', id)
+        const { error } = await db().from('watchlists').delete().eq('user_id', user.id).eq('stock_id', id)
         if (error) throw error
         setWatched(false)
       } else {
-        const { error } = await supabase.from('watchlists').insert({ user_id: user.id, stock_id: id })
+        const { error } = await db().from('watchlists').insert({ user_id: user.id, stock_id: id })
         if (error && !/duplicate/i.test(error.message)) throw error
         setWatched(true)
       }

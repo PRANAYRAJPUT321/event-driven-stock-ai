@@ -7,7 +7,7 @@ import CommandPalette from '@/components/CommandPalette'
 import MarketBar from '@/components/MarketBar'
 import NewsTicker from '@/components/NewsTicker'
 import ThemeToggle from '@/components/ui/ThemeToggle'
-import { createClient, getSessionUser } from '@/lib/supabase/client'
+import { getAppSession, db } from '@/lib/appSession'
 
 const NAV = [
   { href: '/dashboard', label: 'Dashboard' },
@@ -38,6 +38,8 @@ export default function AppShell({
   const router = useRouter()
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [watchlistAlerts, setWatchlistAlerts] = useState(0)
+  const [guest, setGuest] = useState(false)
+  const [canSignIn, setCanSignIn] = useState(false)
 
   const [isMac, setIsMac] = useState(false)
 
@@ -68,17 +70,19 @@ export default function AppShell({
   // globally. Counting every such analysis ever run made it a number that
   // only grew; opening the watchlist now marks them seen.
   useEffect(() => {
-    const supabase = createClient()
     let active = true
 
     async function loadAlertCount() {
       // getSessionUser never throws. The previous unguarded getUser() call
       // rejected when Supabase was unreachable, and since nothing awaited
       // this function that surfaced as an unhandled rejection on every page.
-      const { user } = await getSessionUser()
-      if (!user) return
+      const { user, guest: isGuest, canSignIn: accounts } = await getAppSession()
+      if (active) {
+        setGuest(isGuest)
+        setCanSignIn(accounts)
+      }
 
-      const { data: watched } = await supabase
+      const { data: watched } = await db()
         .from('watchlists')
         .select('created_at, stocks(sector)')
         .eq('user_id', user.id)
@@ -108,7 +112,7 @@ export default function AppShell({
       }
       const since = seen && new Date(seen).getTime() > new Date(earliest).getTime() ? seen : earliest
 
-      const { count } = await supabase
+      const { count } = await db()
         .from('event_analysis')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', user.id)
@@ -197,7 +201,17 @@ export default function AppShell({
                 {userEmail.slice(0, 1).toUpperCase()}
               </span>
             )}
-            {onLogout && (
+            {guest && (
+              <span className="hidden sm:inline-flex chip !text-[11px]" title="No account needed: your history, watchlist and portfolio are saved in this browser.">
+                Guest
+              </span>
+            )}
+            {guest && canSignIn && (
+              <Link href="/auth/login" className="text-xs font-medium px-3 py-1.5 rounded-lg border border-border text-ink-muted hover:text-accent hover:border-accent-dim transition">
+                Sign in
+              </Link>
+            )}
+            {onLogout && !guest && (
               <button
                 onClick={onLogout}
                 className="text-xs font-medium px-3 py-1.5 rounded-lg border border-border text-ink-muted hover:border-avoid-dim hover:text-avoid transition"

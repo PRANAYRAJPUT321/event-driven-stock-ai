@@ -3,7 +3,8 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient, getSessionUser } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase/client'
+import { db, getAppSession, isGuestMode } from '@/lib/appSession'
 import BackendDownNotice from '@/components/BackendDownNotice'
 import AppShell from '@/components/layout/AppShell'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
@@ -73,19 +74,10 @@ export default function Watchlist() {
 
   async function loadWatchlist() {
     setLoading(true)
-    const { user, backendDown: down } = await getSessionUser()
-    if (down) {
-      setBackendDown(true)
-      setLoading(false)
-      return
-    }
-    if (!user) {
-      router.push('/auth/login?next=/watchlist')
-      return
-    }
+    const { user } = await getAppSession()
     setUser(user)
 
-    const { data, error } = await supabase
+    const { data, error } = await db()
       .from('watchlists')
       .select('id, stock_id, created_at, stocks(symbol, name, sector)')
       .eq('user_id', user.id)
@@ -99,7 +91,7 @@ export default function Watchlist() {
 
     const withScores: WatchlistRow[] = await Promise.all(
       (data || []).map(async (row: any) => {
-        const { data: scoreData } = await supabase
+        const { data: scoreData } = await db()
           .from('stock_scores')
           .select('opportunity_score, recommendation, created_at')
           .eq('stock_id', row.stock_id)
@@ -111,7 +103,7 @@ export default function Watchlist() {
         // new activity relevant to something already being tracked.
         let alerts: AlertEvent[] = []
         if (row.stocks?.sector) {
-          const { data: alertData } = await supabase
+          const { data: alertData } = await db()
             .from('event_analysis')
             .select('id, event_title, created_at')
             .eq('user_id', user.id)
@@ -122,7 +114,7 @@ export default function Watchlist() {
           // The same event analysed again is one alert, not three: keep the
           // most recent run of each title.
           const seen = new Set<string>()
-          alerts = (alertData || [])
+          alerts = ((alertData || []) as AlertEvent[])
             .filter((a) => {
               const key = a.event_title.trim().toLowerCase()
               if (seen.has(key)) return false
@@ -149,14 +141,22 @@ export default function Watchlist() {
     setAdding(true)
     setMessage(null)
     try {
-      const response = await fetch('/api/stocks/ensure', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol: hit.symbol }),
-      })
-      const body = await response.json().catch(() => ({}))
-      if (!response.ok || !body.id) throw new Error(body.error || 'Could not add this stock')
-      const { error } = await supabase.from('watchlists').insert({ user_id: user.id, stock_id: body.id })
+      let stockId: string
+      if (isGuestMode()) {
+        // Guest watchlists key stocks by symbol; any NSE company can be added.
+        await db().from('stocks').insert({ id: hit.symbol, symbol: hit.symbol, name: hit.name, sector: (hit as any).sector ?? null })
+        stockId = hit.symbol
+      } else {
+        const response = await fetch('/api/stocks/ensure', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: hit.symbol }),
+        })
+        const body = await response.json().catch(() => ({}))
+        if (!response.ok || !body.id) throw new Error(body.error || 'Could not add this stock')
+        stockId = body.id
+      }
+      const { error } = await db().from('watchlists').insert({ user_id: user.id, stock_id: stockId })
       if (error && !/duplicate/i.test(error.message)) throw error
       setMessage({ tone: 'ok', text: `Added ${hit.name}.` })
       await loadWatchlist()
@@ -169,7 +169,7 @@ export default function Watchlist() {
 
   async function handleRemove(watchlistId: string) {
     setRemovingId(watchlistId)
-    const { error } = await supabase.from('watchlists').delete().eq('id', watchlistId)
+    const { error } = await db().from('watchlists').delete().eq('id', watchlistId)
     if (!error) setRows((prev) => prev.filter((r) => r.id !== watchlistId))
     else setMessage({ tone: 'error', text: `Could not remove: ${error.message}` })
     setRemovingId(null)

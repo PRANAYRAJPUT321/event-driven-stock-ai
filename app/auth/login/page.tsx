@@ -1,7 +1,8 @@
 'use client'
 
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { createClient, describeAuthError, isSupabaseConfigured, isUnreachable } from '@/lib/supabase/client'
+import { getAppSession } from '@/lib/appSession'
 import ThemeToggle from '@/components/ui/ThemeToggle'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
@@ -23,6 +24,11 @@ function LoginForm() {
   const next =
     nextParam && /^\/(?![\/\\])/.test(nextParam) ? nextParam : '/dashboard'
   const supabase = createClient()
+  // Whether accounts can be reached at all; null until known.
+  const [accounts, setAccounts] = useState<boolean | null>(isSupabaseConfigured ? null : false)
+  useEffect(() => {
+    getAppSession().then((s) => setAccounts(s.canSignIn)).catch(() => setAccounts(false))
+  }, [])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -60,17 +66,23 @@ function LoginForm() {
           <p className="text-ink-muted text-sm">Event-driven stock intelligence for Indian equities</p>
         </div>
 
-        {!isSupabaseConfigured && (
-          <div className="bg-avoid-dim border border-avoid-dim text-avoid px-4 py-3 rounded-lg mb-5 text-sm">
-            This deployment was built without Supabase credentials, so sign-in cannot work yet.
-            Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY on the project and
-            redeploy — they are baked in at build time.{' '}
-            <a href="/api/health" className="underline font-medium">
-              Run diagnostics
-            </a>
+        {accounts === false || backendUnreachable ? (
+          // No account service to sign in to — and none is needed: everything
+          // works as a guest, saved in this browser.
+          <div className="panel-elevated shadow-panel p-8 text-center">
+            <p className="text-ink font-semibold mb-2">No account needed</p>
+            <p className="text-sm text-ink-muted mb-6">
+              Use every part of PULSE right away. Your analyses, watchlist and paper portfolio are saved in
+              this browser.
+            </p>
+            <Link
+              href={next}
+              className="block bg-accent hover:bg-accent-bright text-on-accent font-semibold py-2.5 px-4 rounded-lg transition"
+            >
+              Continue as guest →
+            </Link>
           </div>
-        )}
-
+        ) : (
         <div className="panel-elevated shadow-panel p-8">
           {message && (
             <div className="bg-accent-dim/40 border border-accent-dim text-accent-bright px-4 py-3 rounded-lg mb-5 text-sm">
@@ -80,14 +92,6 @@ function LoginForm() {
           {error && (
             <div className="bg-avoid-dim border border-avoid-dim text-avoid px-4 py-3 rounded-lg mb-5 text-sm">
               <p>{error}</p>
-              {backendUnreachable && (
-                <Link
-                  href="/markets"
-                  className="mt-3 block text-center bg-accent hover:bg-accent-bright text-on-accent font-semibold py-2 px-4 rounded-lg transition"
-                >
-                  Continue without signing in →
-                </Link>
-              )}
             </div>
           )}
 
@@ -135,11 +139,12 @@ function LoginForm() {
           {/* The live-market pages need no account and no database, so there
               is somewhere useful to go even when sign-in is impossible. */}
           <div className="mt-3 text-center text-xs text-ink-faint">
-            <Link href="/markets" className="hover:text-accent hover:underline">
-              Or browse live markets without signing in →
+            <Link href={next} className="hover:text-accent hover:underline">
+              Or continue as a guest — no account needed →
             </Link>
           </div>
         </div>
+        )}
       </div>
     </div>
   )

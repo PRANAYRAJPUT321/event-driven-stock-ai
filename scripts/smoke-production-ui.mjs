@@ -54,6 +54,53 @@ async function visit(name, path, { width = 1440, height = 900, theme = 'dark', a
   await ctx.close()
 }
 
+// The visitor journey in guest mode: no account, and no database needed.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' })
+  const page = await ctx.newPage()
+  const errors = []
+  page.on('pageerror', (e) => errors.push('pageerror: ' + String(e).slice(0, 160)))
+  const BAD = /unavailable|unreachable|database|supabase|schema\.sql|sign in to|not saved/i
+  const deadline = Date.now() + 12 * 60_000
+  for (;;) {
+    await page.goto(BASE + '/dashboard', { waitUntil: 'networkidle', timeout: 60000 }).catch(() => {})
+    await page.waitForTimeout(3000)
+    if ((await page.locator('header').innerText().catch(() => '')).includes('Guest')) { report('guest build live'); break }
+    if (Date.now() > deadline) { report('GUEST BUILD NOT LIVE after 12 minutes'); break }
+    await page.waitForTimeout(20000)
+  }
+  const flag = async (label) => {
+    const lines = (await page.locator('main').innerText().catch(() => '')).split('\n').filter((l) => BAD.test(l))
+    report(`guest ${label.padEnd(10)} ${new URL(page.url()).pathname} ${lines.length ? 'FLAGGED ' + JSON.stringify(lines.slice(0, 3)) : 'clean'}`)
+  }
+  try {
+    await flag('dashboard')
+    await page.goto(BASE + '/analyze', { waitUntil: 'networkidle' })
+    await page.locator('textarea').fill('Brent crude jumps 10% after supply cuts in the Middle East')
+    await page.click('button[type="submit"]')
+    await page.waitForURL('**/events/**', { timeout: 90000 })
+    await page.locator('text=Top Affected Stocks').waitFor({ timeout: 60000 })
+    await page.waitForTimeout(2000)
+    await flag('event')
+    await page.locator('tbody tr').first().locator('button:has-text("+ Watch")').click()
+    await page.locator('tbody tr').first().locator('button:has-text("Simulate")').click()
+    await page.waitForTimeout(4000)
+    report('guest row: ' + (await page.locator('tbody tr').first().innerText()).replace(/\s+/g, ' ').slice(0, 120))
+    for (const path of ['/watchlist', '/portfolio', '/history', '/settings']) {
+      await page.goto(BASE + path, { waitUntil: 'networkidle' })
+      await page.waitForTimeout(3000)
+      await flag(path.slice(1))
+    }
+    await page.goto(BASE + '/auth/login', { waitUntil: 'networkidle' })
+    await page.waitForTimeout(3000)
+    report('guest login: ' + ((await page.locator('text=No account needed').count()) ? 'offers guest access' : 'shows sign-in form'))
+  } catch (e) {
+    report('guest journey FAILED: ' + String(e).slice(0, 200))
+  }
+  for (const e of [...new Set(errors)].slice(0, 6)) report('    ' + e)
+  await ctx.close()
+}
+
 await visit('markets-dark', '/markets')
 await visit('markets-light', '/markets', { theme: 'light' })
 await visit('markets-mobile', '/markets', { width: 390, height: 844 })

@@ -162,13 +162,12 @@ export default function Discover() {
         )}
       </div>
 
-      {live && (
-        <p className="text-sm text-hold bg-hold-dim border border-hold-dim rounded-lg px-3 py-2 mb-4">
-          {backendDown
-            ? 'Reading headlines directly from the news feed because the database is unreachable. They are categorised by the offline rule engine and not saved.'
-            : user
-              ? 'Showing headlines straight from the news feed. Press Refresh News to store them in your feed.'
-              : 'Reading headlines directly from the news feed. Sign in to build up a stored, categorised feed.'}
+      {/* Only a signed-in account has a stored feed to build; for everyone
+          else live headlines are simply how the page works, not a fallback
+          worth a warning. */}
+      {live && user && !backendDown && (
+        <p className="text-sm text-ink-muted bg-surface-2 border border-border rounded-lg px-3 py-2 mb-4">
+          Showing headlines straight from the news feed. Press Refresh News to store them in your feed.
         </p>
       )}
 

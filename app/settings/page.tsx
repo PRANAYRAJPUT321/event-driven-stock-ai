@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient, getSessionUser } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase/client'
+import { db, getAppSession, isGuestMode } from '@/lib/appSession'
 import BackendDownNotice from '@/components/BackendDownNotice'
 import AppShell from '@/components/layout/AppShell'
 import ThemeToggle from '@/components/ui/ThemeToggle'
@@ -33,20 +34,14 @@ export default function Settings() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
   const [cvd, setCvd] = useHeatPalette()
+  const [guest, setGuest] = useState(false)
 
   useEffect(() => {
     const init = async () => {
-      const { user: sessionUser, backendDown: down } = await getSessionUser()
-      if (down) {
-        setBackendDown(true)
-        return
-      }
-      if (!sessionUser) {
-        router.push('/auth/login?next=/settings')
-        return
-      }
+      const { user: sessionUser, guest: isGuest } = await getAppSession()
       setUser(sessionUser)
-      const { data, error } = await supabase
+      setGuest(isGuest)
+      const { data, error } = await db()
         .from('profiles')
         .select('full_name, risk_profile, investment_horizon, investment_experience')
         .eq('id', sessionUser.id)
@@ -82,7 +77,7 @@ export default function Settings() {
       investment_experience: profile.investment_experience || null,
       updated_at: new Date().toISOString(),
     }
-    const { data, error } = await supabase.from('profiles').update(update).eq('id', user.id).select('id')
+    const { data, error } = await db().from('profiles').update(update).eq('id', user.id).select('id')
     if (error) {
       setMessage({ tone: 'error', text: `Could not save: ${error.message}` })
     } else if (!data || data.length === 0) {
@@ -95,7 +90,7 @@ export default function Settings() {
       })
     } else {
       // Keep the name the header greets with in step with the profile.
-      if (update.full_name) await supabase.auth.updateUser({ data: { full_name: update.full_name } }).catch(() => {})
+      if (update.full_name && !isGuestMode()) await supabase.auth.updateUser({ data: { full_name: update.full_name } }).catch(() => {})
       setSaved(profile)
       setMessage({ tone: 'ok', text: 'Saved to your profile.' })
     }
@@ -134,7 +129,10 @@ export default function Settings() {
           <h2 id="profile-heading" className="text-sm font-bold text-ink mb-1">
             Profile
           </h2>
-          <p className="text-xs text-ink-faint mb-5">Your name is used to greet you on the dashboard.</p>
+          <p className="text-xs text-ink-faint mb-5">
+            Your name is used to greet you on the dashboard.
+            {guest && ' Everything here is saved in this browser.'}
+          </p>
           <div className="space-y-4">
             <div>
               <label htmlFor="full-name" className="stat-label block mb-1.5">
@@ -146,7 +144,7 @@ export default function Settings() {
               <label htmlFor="email" className="stat-label block mb-1.5">
                 Email
               </label>
-              <input id="email" type="email" className="input w-full opacity-70" value={user?.email ?? ''} readOnly />
+              <input id="email" type="email" className="input w-full opacity-70" value={user?.email ?? (guest ? 'Guest — no account needed' : '')} readOnly />
             </div>
           </div>
 
@@ -226,6 +224,7 @@ export default function Settings() {
           </label>
         </section>
 
+        {!guest && (
         <section className="panel p-5 sm:p-7" aria-labelledby="account-heading">
           <h2 id="account-heading" className="text-sm font-bold text-ink mb-4">
             Session
@@ -237,6 +236,7 @@ export default function Settings() {
             Log out
           </button>
         </section>
+        )}
       </div>
     </AppShell>
   )

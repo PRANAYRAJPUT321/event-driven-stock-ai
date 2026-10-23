@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { getAppSession } from '@/lib/appSession'
 
 interface NewsTickerItem {
   id: string
@@ -29,6 +30,10 @@ export default function NewsTicker() {
     let active = true
 
     async function load() {
+      // The stored feed belongs to signed-in accounts; guests (and visitors
+      // while the database is unreachable) get no ticker rather than a
+      // request that cannot succeed every 90 seconds.
+      if ((await getAppSession()).guest) return
       const { data } = await supabase
         .from('news_feeds')
         .select('id, title, event_type, detected_sectors')

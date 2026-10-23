@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createClient, describeAuthError, isSupabaseConfigured } from '@/lib/supabase/client'
 import ThemeToggle from '@/components/ui/ThemeToggle'
+import { getAppSession } from '@/lib/appSession'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
@@ -14,6 +15,11 @@ export default function SignUp() {
   const [error, setError] = useState('')
   const router = useRouter()
   const supabase = createClient()
+  // Whether accounts can be reached at all; null until known.
+  const [accounts, setAccounts] = useState<boolean | null>(isSupabaseConfigured ? null : false)
+  useEffect(() => {
+    getAppSession().then((s) => setAccounts(s.canSignIn)).catch(() => setAccounts(false))
+  }, [])
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -56,17 +62,21 @@ export default function SignUp() {
           <p className="text-ink-muted text-sm">Event-driven stock intelligence for Indian equities</p>
         </div>
 
-        {!isSupabaseConfigured && (
-          <div className="bg-avoid-dim border border-avoid-dim text-avoid px-4 py-3 rounded-lg mb-5 text-sm">
-            This deployment was built without Supabase credentials, so sign-in cannot work yet.
-            Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY on the project and
-            redeploy — they are baked in at build time.{' '}
-            <a href="/api/health" className="underline font-medium">
-              Run diagnostics
-            </a>
+        {accounts === false ? (
+          <div className="panel-elevated shadow-panel p-8 text-center">
+            <p className="text-ink font-semibold mb-2">No account needed</p>
+            <p className="text-sm text-ink-muted mb-6">
+              Use every part of PULSE right away. Your analyses, watchlist and paper portfolio are saved in
+              this browser.
+            </p>
+            <Link
+              href="/dashboard"
+              className="block bg-accent hover:bg-accent-bright text-on-accent font-semibold py-2.5 px-4 rounded-lg transition"
+            >
+              Continue as guest →
+            </Link>
           </div>
-        )}
-
+        ) : (
         <div className="panel-elevated shadow-panel p-8">
           {error && (
             <div className="bg-avoid-dim border border-avoid-dim text-avoid px-4 py-3 rounded-lg mb-5 text-sm">
@@ -126,7 +136,13 @@ export default function SignUp() {
               Sign in
             </Link>
           </div>
+          <div className="mt-3 text-center text-xs text-ink-faint">
+            <Link href="/dashboard" className="hover:text-accent hover:underline">
+              Or continue as a guest — no account needed →
+            </Link>
+          </div>
         </div>
+        )}
       </div>
     </div>
   )

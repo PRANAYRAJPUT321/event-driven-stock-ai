@@ -2,7 +2,9 @@
 
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { createClient, getSessionUser } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase/client'
+import { getAppSession, isGuestMode } from '@/lib/appSession'
+import { saveGuestAnalysis } from '@/lib/guestDb'
 import AnalysisResult, { type AnalysisPayload } from '@/components/AnalysisResult'
 import AppShell from '@/components/layout/AppShell'
 import type { User } from '@supabase/supabase-js'
@@ -37,7 +39,6 @@ function AnalyzeForm() {
   const [unsavedResult, setUnsavedResult] = useState<AnalysisPayload | null>(null)
   const [user, setUser] = useState<User | null>(null)
   const router = useRouter()
-  const [backendDown, setBackendDown] = useState(false)
   const searchParams = useSearchParams()
   const newsId = searchParams.get('news_id')
   // Discover passes the headline itself when it is showing live, unstored
@@ -50,8 +51,7 @@ function AnalyzeForm() {
       // No guard here: the analysis engine is deterministic and needs no
       // database, so this page works signed out and while Supabase is down.
       // The session only decides whether the result can be saved.
-      const { user: sessionUser, backendDown: down } = await getSessionUser()
-      setBackendDown(down)
+      const { user: sessionUser } = await getAppSession()
       setUser(sessionUser)
     }
     init()
@@ -99,6 +99,11 @@ function AnalyzeForm() {
         router.push(`/events/${data.analysisId}`)
         return
       }
+      // Guest: kept in this browser, and opened exactly like a saved one.
+      if (isGuestMode() && data.result) {
+        router.push(`/events/${await saveGuestAnalysis(data.result)}`)
+        return
+      }
       // No database to save to — show the result rather than discarding it.
       setUnsavedResult(data.result)
     } catch (err: any) {
@@ -144,13 +149,6 @@ function AnalyzeForm() {
           Every recommendation this platform produces is tied to a specific event — never a generic stock call.
         </p>
 
-        {(backendDown || !user) && (
-          <div className="bg-hold-dim border border-hold-dim text-hold px-4 py-3 rounded-lg mb-6 text-sm">
-            {backendDown
-              ? 'The database is unreachable, so this analysis will run but will not be saved to your history.'
-              : 'You are not signed in, so this analysis will run but will not be saved to your history.'}
-          </div>
-        )}
 
         <div className="panel-elevated p-7 shadow-panel">
           {newsSource && (
