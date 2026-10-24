@@ -30,6 +30,16 @@ export default function History() {
   const [rows, setRows] = useState<AnalysisRow[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('ALL')
+  const [removeError, setRemoveError] = useState<string | null>(null)
+
+  async function handleRemove(id: string, title: string) {
+    if (!window.confirm(`Remove “${title.slice(0, 80)}” from your history?`)) return
+    setRemoveError(null)
+    await db().from('stock_scores').delete().eq('event_analysis_id', id)
+    const { error } = await db().from('event_analysis').delete().eq('id', id)
+    if (error) setRemoveError(`Could not remove it: ${error.message}`)
+    else setRows((prev) => prev.filter((r) => r.id !== id))
+  }
 
   useEffect(() => {
     const load = async () => {
@@ -110,12 +120,16 @@ export default function History() {
           </div>
         ) : (
           <div className="space-y-2">
+            {removeError && <p className="text-xs text-avoid mb-2" role="status">{removeError}</p>}
             {filtered.map((row) => (
-              <button
+              <div
                 key={row.id}
-                onClick={() => router.push(`/events/${row.id}`)}
-                className="tile-hover w-full text-left flex items-center justify-between border border-border rounded-lg p-4 hover:bg-surface-hover"
+                className="tile-hover w-full flex items-center justify-between border border-border rounded-lg hover:bg-surface-hover"
               >
+                <button
+                  onClick={() => router.push(`/events/${row.id}`)}
+                  className="min-w-0 flex-1 flex items-center justify-between text-left p-4"
+                >
                 <div className="min-w-0">
                   <p className="font-semibold text-ink line-clamp-2 sm:line-clamp-1 break-words" title={row.event_title}>{row.event_title}</p>
                   <p className="text-xs text-ink-faint mt-1">
@@ -127,7 +141,16 @@ export default function History() {
                   <ScoreChip score={row.opportunity_score} size="sm" />
                   <RecommendationBadge rec={row.recommendation} size="sm" />
                 </div>
-              </button>
+                </button>
+                <button
+                  onClick={() => handleRemove(row.id, row.event_title)}
+                  className="flex-shrink-0 self-stretch px-3 sm:px-4 text-ink-faint hover:text-avoid border-l border-border transition"
+                  aria-label={`Remove ${row.event_title} from history`}
+                  title="Remove from history"
+                >
+                  ✕
+                </button>
+              </div>
             ))}
           </div>
         )}

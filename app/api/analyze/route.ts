@@ -52,8 +52,34 @@ export async function POST(request: NextRequest) {
         ).slice(0, MAX_STOCKS_REQUESTED)
       : []
 
-    if (!event || !event.trim()) {
+    if (!event || typeof event !== 'string' || !event.trim()) {
       return NextResponse.json({ error: 'Event text is required' }, { status: 400 })
+    }
+    if (event.length > 2000) {
+      return NextResponse.json({ error: 'Please keep the event to a short description (under 2,000 characters).' }, { status: 400 })
+    }
+
+    // Text that names no market channel, no sector and no company is not an
+    // event the engine can trace — "I love you" used to fall through to a
+    // catch-all "Diversified" sector and come back as a HOLD on Adani
+    // Enterprises with a 62 score. Say so instead of inventing a call.
+    const ruleRead = classifyEventByRules(event)
+    const words = event.trim().split(/\s+/).filter((w: string) => /[a-z0-9]/i.test(w))
+    const nothingRecognised =
+      ruleRead.event_type === 'OTHER' &&
+      ruleRead.affected_sectors.length === 1 &&
+      ruleRead.affected_sectors[0] === 'Diversified'
+    if (requestedSymbols.length === 0 && (words.length < 2 || nothingRecognised)) {
+      return NextResponse.json(
+        {
+          code: 'NOT_AN_EVENT',
+          error:
+            `“${event.trim().slice(0, 60)}” doesn’t look like a market event, so there is nothing to trace to stocks. ` +
+            'Describe something that moves markets — a policy decision, a commodity or currency move, ' +
+            'company results, or economic data. For example: “RBI cuts the repo rate by 25 bps”.',
+        },
+        { status: 422 }
+      )
     }
 
     // Whether we can persist is a separate question from whether we can
@@ -82,7 +108,7 @@ export async function POST(request: NextRequest) {
     // which is what an unfunded key would have produced anyway.
     const classification = user
       ? await classifyEvent(event)
-      : classifyEventByRules(event)
+      : ruleRead
 
     let eventData: { id: string } | null = null
     let eventInsertError: string | null = null

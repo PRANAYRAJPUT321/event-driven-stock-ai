@@ -630,3 +630,14 @@ body {
 .scrollbar-none {
   scrollbar-width: none;
 }
+
+/* iOS Safari zooms into any text field under 16px when it is focused, and
+   stays zoomed after the page changes — the app then looks cut off on both
+   sides. 16px fields on small screens prevent it without disabling zoom. */
+@media (max-width: 767px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
