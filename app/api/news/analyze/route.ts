@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { analyseImpact } from '@/lib/ai/impactAnalyzer'
 import { NIFTY_50, equitiesForSectors } from '@/lib/market/indianEquities'
-import { classifyEventByRules } from '@/lib/ai/ruleClassifier'
+import { assessEvent } from '@/lib/ai/ruleClassifier'
 
 /**
  * Two-sided impact read for one headline.
@@ -31,10 +31,8 @@ export async function POST(request: NextRequest) {
     // company list tied to the event — without this the empty list used to
     // fall through to the first six names of the index, so a crude-oil story
     // came back reporting an impact on six banks.
-    const sectors: string[] =
-      suppliedSectors.length > 0
-        ? suppliedSectors
-        : classifyEventByRules(`${title} ${description}`.trim()).affected_sectors ?? []
+    const read = assessEvent(`${title} ${description}`.trim())
+    const sectors: string[] = suppliedSectors.length > 0 ? suppliedSectors : read.classification.affected_sectors ?? []
 
     // Companies may be named explicitly, or derived from the affected sectors
     // so a headline about "Banking" still produces a per-company read.
@@ -52,11 +50,21 @@ export async function POST(request: NextRequest) {
             '',
         }))
     } else {
-      companies = equitiesForSectors(sectors, MAX_COMPANIES).map((c) => ({
-        symbol: c.symbol,
-        name: c.name,
-        sector: c.sector,
-      }))
+      // The companies a headline names come first, and for news about a
+      // company they are the only ones it reaches.
+      const named = read.companies
+      const pool =
+        read.scope === 'company' && named.length > 0
+          ? named
+          : [
+              ...named,
+              ...(read.focus.length > 0
+                ? NIFTY_50.filter((s) => read.focus.includes(s.symbol))
+                : equitiesForSectors(sectors, MAX_COMPANIES)),
+            ]
+      companies = Array.from(new Map(pool.map((c) => [c.symbol, c])).values())
+        .slice(0, MAX_COMPANIES)
+        .map((c) => ({ symbol: c.symbol, name: c.name, sector: c.sector }))
     }
 
     const analysis = analyseImpact({ title, description, sectors, companies })
