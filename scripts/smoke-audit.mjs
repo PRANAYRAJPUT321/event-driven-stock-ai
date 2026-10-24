@@ -16,20 +16,20 @@ const report = (line) => {
 
 report(`# Audit — ${BASE} — ${new Date().toISOString()}`)
 
-// Wait for the build under test: only it scores a company outside the
-// NIFTY 50, so until that answer appears production is the previous build.
+// Wait for the build under test: only it reads "GST on cars cut" as a cut,
+// so until that answer appears production is the previous build.
 {
   const deadline = Date.now() + 15 * 60_000
   for (;;) {
     const probe = await fetch(BASE + '/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event: 'Union Bank of India Q2 net profit rises 30%' }),
+      body: JSON.stringify({ event: 'GST on cars cut from 28% to 18%' }),
       signal: AbortSignal.timeout(30000),
     })
       .then((r) => r.json())
       .catch(() => ({}))
-    if (probe?.result?.stocks?.[0]?.symbol === 'UNIONBANK') {
+    if (probe?.result?.classification?.direction === 'POSITIVE') {
       report('new build is live')
       break
     }
@@ -66,6 +66,8 @@ const EVENTS = [
   'Government hikes windfall tax on crude oil',
   'Nifty Auto Falls Nearly 8% in a Month',
   'Stocks to Watch Today, Oct 23: Jio IPO, Infosys, Swiggy, HPCL in focus',
+  'Fed holds rates steady, signals two cuts this year', "Why banks are not raising FD rates despite RBI's repo rate hike",
+  'India VIX spikes 10% as markets turn volatile', 'Sensex falls 800 points as US tariffs weigh',
 ]
 for (const event of EVENTS) {
   const t0 = Date.now()

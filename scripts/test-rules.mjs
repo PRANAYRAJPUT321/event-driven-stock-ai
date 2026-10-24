@@ -834,6 +834,7 @@ check('gold reaches the jeweller, not every consumer company', assessEvent('Gold
 const rain = analyseImpact({ title: 'Monsoon rainfall forecast at 105% of the long-period average', sectors: ['FMCG'] })
 check('a good monsoon helps staples makers', rain.sectorImpacts[0].direction, 'POSITIVE')
 check('a GST cut on cars reaches carmakers only', classifyEventByRules('GST on cars cut from 28% to 18%').affected_sectors, ['Auto'])
+check('a GST cut on cars is analysed as a cut', [assessEvent('GST on cars cut from 28% to 18%').verdict, classifyEventByRules('GST on cars cut from 28% to 18%').direction], ['ok', 'POSITIVE'])
 
 section('company events reach the company named')
 const infy = assessEvent('Infosys Q2 results beat estimates')
@@ -897,6 +898,7 @@ for (const [text, type, direction] of [
   ['Stock Market Today: Sensex, Nifty Extend Losses For 4th Day Amid Selling Pressure, Oil Price Surge', 'MARKET_MOVE', 'NEGATIVE'],
   ['Green Stocks, Oct 22: Market Falls as Crude Oil Surge and Geopolitical Tensions Weigh on Sentiment', 'GEOPOLITICAL', 'NEGATIVE'],
   ['Fed holds rates steady, signals two cuts this year', 'GLOBAL_MARKET_SHOCK', 'POSITIVE'],
+  ["Why banks are not raising FD rates despite RBI's repo rate hike", 'MONETARY_POLICY', 'NEGATIVE'],
   ['Infosys cuts FY27 guidance; Q2 net profit rises 6.2% to ₹7,828 crore', 'EARNINGS', 'NEGATIVE'],
   ['Eternal Q2 results: Net profit rises 92% to Rs 125 crore, but misses estimates; shares fall 3.5%', 'EARNINGS', 'NEGATIVE'],
   ['HUL Q2: volume growth flat, margins contract', 'EARNINGS', 'NEGATIVE'],

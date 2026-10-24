@@ -283,7 +283,8 @@ export function detectPolarity(text: string): Polarity {
  */
 /** Where one clause of a headline ends and its cause or contrast begins. */
 const CLAUSE_BREAK =
-  /\s+(?:as|after|amid|despite|while|but|even as|though|although|since|because|on|following|ahead of|due to|led by|driven by|even though|whereas)\s+|\s*[;:|—–]\s*|,\s+/g
+  // "on" is not a break: "GST on cars cut" is one clause.
+  /\s+(?:as|after|amid|despite|while|but|even as|though|although|since|because|following|ahead of|due to|led by|driven by|even though|whereas)\s+|\s*[;:|—–]\s*|,\s+/g
 
 function localPolarity(text: string, keywords: string[]): Polarity | null {
   // Only moves in the clause that names the channel describe it: "Indian
@@ -378,9 +379,11 @@ const THEMES: Theme[] = [
       if (/\bhawkish\b/.test(text)) return 'up'
       if (/\b(dovish|accommodative)\b/.test(text)) return 'down'
       if (HOLD_RE.test(text) && !/\b(cut|cuts|hike|hikes|raise|raises)\b/.test(text)) return 'neutral'
-      if (NEGATED_RATE_MOVE.test(text)) return 'neutral'
+      // The RBI's own stated move first ("…despite RBI's repo rate hike"),
+      // then a negated one ("does not cut") as a hold.
       const rate = localPolarity(text, ['repo rate', 'policy rate', 'interest rate', 'rate hike', 'rate cut', 'repo', 'rates', 'rate'])
       if (rate) return rate
+      if (NEGATED_RATE_MOVE.test(text)) return 'neutral'
       // Liquidity operations: adding money is easing, draining it tightening.
       if (/\b(inject\w*|infus\w*|liquidity (boost|support|injection)|variable rate repo|vrr auction|omo purchase)\b/.test(text)) return 'down'
       if (/\b(drain\w*|absorb\w*|variable rate reverse repo|vrrr|liquidity squeeze)\b/.test(text)) return 'up'
