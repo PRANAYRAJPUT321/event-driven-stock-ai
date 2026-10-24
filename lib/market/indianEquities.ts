@@ -96,7 +96,7 @@ export const NIFTY_50: EquityConstituent[] = [
 
   // Industrials, telecom, transport & infrastructure
   { symbol: 'LT', name: 'Larsen & Toubro', sector: 'Engineering', industry: 'Construction', isin: 'INE018A01030' },
-  { symbol: 'BEL', name: 'Bharat Electronics', sector: 'Engineering', industry: 'Capital Goods', isin: 'INE263A01024' },
+  { symbol: 'BEL', name: 'Bharat Electronics', sector: 'Defence', industry: 'Capital Goods', isin: 'INE263A01024' },
   { symbol: 'ADANIENT', name: 'Adani Enterprises', sector: 'Diversified', industry: 'Metals & Mining', isin: 'INE423A01024' },
   { symbol: 'ADANIPORTS', name: 'Adani Ports & SEZ', sector: 'Ports', industry: 'Services', isin: 'INE742F01042' },
   { symbol: 'BHARTIARTL', name: 'Bharti Airtel', sector: 'Telecom', industry: 'Telecommunication', isin: 'INE397D01024' },

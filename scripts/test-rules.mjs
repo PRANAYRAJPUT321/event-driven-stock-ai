@@ -69,7 +69,7 @@ try {
 }
 
 const require = createRequire(import.meta.url)
-const { classifyEventByRules, categorizeNewsByRules, buildCounterArgumentFromRules } =
+const { classifyEventByRules, categorizeNewsByRules, buildCounterArgumentFromRules, assessEvent } =
   require(path.join(out, 'ai/ruleClassifier.js'))
 const { parseRssFeed } = require(path.join(out, 'news/rssNews.js'))
 const { parseChart } = require(path.join(out, 'market/yahooFinance.js'))
@@ -77,7 +77,7 @@ const { analyseImpact, impactScore } = require(path.join(out, 'ai/impactAnalyzer
 const { historicalReturnToScore } = require(path.join(out, 'market/historicalEngine.js'))
 const { equitiesForSectors, sectorsWithoutConstituents } =
   require(path.join(out, 'market/indianEquities.js'))
-const { calculateCompositeFromAvailable, recommendationFromComposite } =
+const { calculateCompositeFromAvailable, recommendationFromComposite, scoreToRecommendation } =
   require(path.join(out, 'scoring/scoreCalculator.js'))
 const { mapWithConcurrency, yahooRequest, fetchSparkBatch } =
   require(path.join(out, 'market/yahooClient.js'))
@@ -766,6 +766,127 @@ checkThat('the dollar index is not claimed — it is not a currency pair',
   globalThis.fetch = realFetch
   check('an outage yields nothing rather than throwing', fx.length, 0)
 }
+
+
+// ─────────────── what a reviewer types: the faculty-review regressions ───────────────
+section('direction in any tense, and never invented')
+
+// The production bug: "crashed" was not a known word, so the polarity came
+// back neutral, and the impact table fell back to its "up" side — a crude
+// SPIKE — recommending ONGC and calling airlines a loser.
+const crash = classifyEventByRules('Crude oil crashed by 25%')
+check('"crashed" reads as a fall: positive for the market', crash.direction, 'POSITIVE')
+checkThat('a 25% crash is a large event', crash.magnitude >= 80, `magnitude=${crash.magnitude}`)
+const crashImpact = analyseImpact({
+  title: 'Crude oil crashed by 25%',
+  sectors: [],
+  companies: [
+    { symbol: 'INDIGO', name: 'IndiGo', sector: 'Aviation' },
+    { symbol: 'ONGC', name: 'ONGC', sector: 'Energy' },
+  ],
+})
+check('a crude crash helps the airline', crashImpact.companyImpacts[0].direction, 'POSITIVE')
+check('a crude crash hurts the producer', crashImpact.companyImpacts[1].direction, 'NEGATIVE')
+for (const [text, want] of [
+  ['Crude oil plunged 8% overnight', 'POSITIVE'],
+  ['Brent tanked on demand fears', 'POSITIVE'],
+  ['Crude oil prices soared 12%', 'NEGATIVE'],
+  ['Oil prices have risen sharply', 'NEGATIVE'],
+  ['OPEC+ announces output cut', 'NEGATIVE'],
+  ['Saudi Arabia raises crude output', 'POSITIVE'],
+]) check(`"${text}"`, classifyEventByRules(text).direction, want)
+
+check('a channel with no stated direction is refused, not guessed', assessEvent('Crude oil prices').verdict, 'no_direction')
+check('no impact read is offered for it either',
+  analyseImpact({ title: 'Crude oil prices', sectors: ['Aviation'] }).sectorImpacts[0].direction, 'NEUTRAL')
+
+section('negation and holds')
+for (const text of ['RBI does not cut rates', 'RBI unlikely to cut rates this year', 'RBI keeps repo rate unchanged']) {
+  const c = classifyEventByRules(text)
+  check(`"${text}" is a hold`, [c.event_type, c.direction], ['MONETARY_POLICY', 'NEUTRAL'])
+}
+const hold = analyseImpact({ title: 'RBI keeps repo rate unchanged', sectors: ['Banking'] })
+checkThat('a hold is not read as a hike', !hold.sectorImpacts[0].negatives.some((t) => /treasury losses/i.test(t)),
+  JSON.stringify(hold.sectorImpacts[0]))
+
+section('channels a reviewer tries')
+for (const [text, type, direction] of [
+  ['US Fed raises interest rates', 'GLOBAL_MARKET_SHOCK', 'NEGATIVE'],
+  ['US Fed signals higher-for-longer interest rates', 'GLOBAL_MARKET_SHOCK', 'NEGATIVE'],
+  ['Fed cuts rates by 50 bps', 'GLOBAL_MARKET_SHOCK', 'POSITIVE'],
+  ['War breaks out between India and Pakistan', 'GEOPOLITICAL', 'NEGATIVE'],
+  ['Ceasefire announced between Israel and Iran', 'GEOPOLITICAL', 'POSITIVE'],
+  ['Gold prices hit record high', 'COMMODITY_SHOCK', 'NEGATIVE'],
+  ['Sensex falls 1000 points', 'MARKET_MOVE', 'NEGATIVE'],
+  ['Nifty hits all time high', 'MARKET_MOVE', 'POSITIVE'],
+  ['Covid lockdown announced again', 'PANDEMIC', 'NEGATIVE'],
+  ['US imposes 50% tariffs on Indian goods', 'TRADE_POLICY', 'NEGATIVE'],
+  ['Rupee depreciates to 90 per dollar', 'CURRENCY', 'POSITIVE'],
+  ['Unemployment rises to 8%', 'EMPLOYMENT', 'NEGATIVE'],
+]) {
+  const c = classifyEventByRules(text)
+  check(`"${text}"`, [c.event_type, c.direction], [type, direction])
+}
+checkThat('a war reaches defence suppliers', classifyEventByRules('War breaks out between India and Pakistan').affected_sectors.includes('Defence'))
+check('gold reaches the jeweller, not every consumer company', assessEvent('Gold prices hit record high').focus, ['TITAN'])
+const rain = analyseImpact({ title: 'Monsoon rainfall forecast at 105% of the long-period average', sectors: ['FMCG'] })
+check('a good monsoon helps staples makers', rain.sectorImpacts[0].direction, 'POSITIVE')
+check('a GST cut on cars reaches carmakers only', classifyEventByRules('GST on cars cut from 28% to 18%').affected_sectors, ['Auto'])
+
+section('company events reach the company named')
+const infy = assessEvent('Infosys Q2 results beat estimates')
+check('results name the company', infy.companies.map((c) => c.symbol), ['INFY'])
+check('results are company-scoped', infy.scope, 'company')
+const infyImpact = analyseImpact({
+  title: 'Infosys Q2 results beat estimates',
+  sectors: ['IT'],
+  companies: [
+    { symbol: 'INFY', name: 'Infosys', sector: 'IT' },
+    { symbol: 'TCS', name: 'TCS', sector: 'IT' },
+  ],
+})
+check('a beat is positive for the company', infyImpact.companyImpacts[0].direction, 'POSITIVE')
+check('a peer is not credited with it', infyImpact.companyImpacts[1].direction, 'NEUTRAL')
+for (const [text, symbols, direction] of [
+  ['HDFC Bank quarterly profit falls 10%', ['HDFCBANK'], 'NEGATIVE'],
+  ['Tata Motors net loss widens in Q3', ['TMPV'], 'NEGATIVE'],
+  ['Reliance announces bonus issue', ['RELIANCE'], 'POSITIVE'],
+  ['TCS announces share buyback', ['TCS'], 'POSITIVE'],
+  ['Tech Mahindra wins a $500 million deal', ['TECHM'], 'POSITIVE'],
+  ['Adani shares crash after fraud allegations', ['ADANIENT', 'ADANIPORTS'], 'NEGATIVE'],
+  ['Infosys CEO resigns', ['INFY'], 'NEGATIVE'],
+  ['Airtel raises mobile tariffs by 15%', ['BHARTIARTL'], 'POSITIVE'],
+  ['Sun Pharma gets USFDA warning letter', ['SUNPHARMA'], 'NEGATIVE'],
+  ['SBI Life premium income jumps 20%', ['SBILIFE'], 'POSITIVE'],
+]) {
+  const a = assessEvent(text)
+  check(`"${text}"`, [a.companies.map((c) => c.symbol), a.classification.direction, a.verdict], [symbols, direction, 'ok'])
+}
+check('a similarly named company outside the index is not mistaken for it',
+  assessEvent('Reliance Power shares surge 10%').companies.length, 0)
+check('…and is reported as outside the universe', assessEvent('Reliance Power shares surge 10%').verdict, 'outside_universe')
+
+section('text that is not an event')
+for (const [text, verdict] of [
+  ['I love you', 'not_event'],
+  ['hello', 'not_event'],
+  ['12345', 'not_event'],
+  ['I love HDFC Bank', 'not_event'],
+  ['I love banks', 'not_event'],
+  ['Should I buy Reliance?', 'not_event'],
+  ['Is it a good time to invest in Infosys?', 'not_event'],
+  ['Tata Motors', 'not_event'],
+  ['आरबीआई ने रेपो रेट घटाया', 'non_english'],
+  ['Quarterly results season begins', 'needs_company'],
+  ['Apple launches new iPhone', 'needs_company'],
+]) check(`"${text}"`, assessEvent(text).verdict, verdict)
+check('a company named in a non-event is offered as a way forward',
+  assessEvent('I love HDFC Bank').companies.map((c) => c.symbol), ['HDFCBANK'])
+
+section('recommendation bands')
+check('70 is a BUY', scoreToRecommendation(70), 'BUY')
+check('a near-neutral 59 is a HOLD, not an AVOID', scoreToRecommendation(59), 'HOLD')
+check('below 50 is an AVOID', scoreToRecommendation(49), 'AVOID')
 
 console.log(
   failures === 0

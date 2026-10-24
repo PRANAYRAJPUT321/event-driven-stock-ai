@@ -15,7 +15,8 @@ export default function ScoreChip({ score, size = 'md' }: { score: number | null
     )
   }
 
-  const color = score >= 75 ? 'var(--buy)' : score >= 40 ? 'var(--hold)' : 'var(--avoid)'
+  // Same bands as the recommendation: BUY from 70, AVOID below 50.
+  const color = score >= 70 ? 'var(--buy)' : score >= 50 ? 'var(--hold)' : 'var(--avoid)'
   return (
     <span
       className={`inline-flex items-center rounded-full font-bold font-mono mono-tabular border ${sizeCls}`}

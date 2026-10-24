@@ -206,6 +206,7 @@ const SECTOR_QUERIES: Record<string, string> = {
   Cement: '("cement India" OR "cement prices India" OR UltraTech)',
   Chemicals: '("Indian chemicals sector" OR "specialty chemicals India")',
   Engineering: '("capital goods India" OR "Larsen & Toubro" OR "infrastructure India")',
+  Defence: '("defence stocks India" OR "Bharat Electronics" OR "defence orders India")',
   Consumer: '("consumer demand India" OR "consumption India" OR "urban demand India")',
   Retail: '("retail India" OR "quick commerce India" OR DMart OR "Reliance Retail")',
   Aviation: '("Indian aviation" OR IndiGo OR "air fares India")',

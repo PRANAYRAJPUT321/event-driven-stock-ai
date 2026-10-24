@@ -64,6 +64,12 @@ export interface EventClassification {
   confidence: number
   reasoning: string
   transmission_explanation: string
+  /** The rule engine's channel id, which keys the two-sided impact table. */
+  channel?: string
+  /** Whether the event is about the named companies or whole sectors. */
+  scope?: 'company' | 'macro'
+  /** NIFTY 50 symbols the event text names. */
+  companies?: string[]
 }
 
 export function extractJson(text: string): any {

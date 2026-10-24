@@ -1,8 +1,7 @@
 'use client'
 
 import { Suspense, useEffect, useState } from 'react'
-import { createClient, describeAuthError, isSupabaseConfigured, isUnreachable } from '@/lib/supabase/client'
-import { getAppSession } from '@/lib/appSession'
+import { createClient, describeAuthError, getSessionUser, isSupabaseConfigured, isUnreachable } from '@/lib/supabase/client'
 import ThemeToggle from '@/components/ui/ThemeToggle'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
@@ -27,7 +26,9 @@ function LoginForm() {
   // Whether accounts can be reached at all; null until known.
   const [accounts, setAccounts] = useState<boolean | null>(isSupabaseConfigured ? null : false)
   useEffect(() => {
-    getAppSession().then((s) => setAccounts(s.canSignIn)).catch(() => setAccounts(false))
+    // Asked of the server directly: the shared session check answers
+    // guests instantly and only learns this in the background.
+    getSessionUser().then((s) => setAccounts(!s.backendDown)).catch(() => setAccounts(false))
   }, [])
 
   const handleLogin = async (e: React.FormEvent) => {

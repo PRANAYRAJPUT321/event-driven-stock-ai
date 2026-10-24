@@ -113,12 +113,16 @@ export default function Dashboard() {
 
       const { data } = await db()
         .from('event_analysis')
-        .select('id, event_title, recommendation, opportunity_score, affected_sectors, created_at')
+        .select('id, event_title, recommendation, opportunity_score, affected_sectors, created_at, invalid_reason')
         .eq('user_id', sessionUser.id)
         .order('created_at', { ascending: false })
         .limit(100)
 
-      const all: (RecentAnalysis & { affected_sectors?: string[] | null })[] = data || []
+      // Analyses the current engine withdrew (text that was never an event)
+      // are not calls, so they count towards nothing here.
+      const all: (RecentAnalysis & { affected_sectors?: string[] | null })[] = (data || []).filter(
+        (r: { invalid_reason?: string | null }) => !r.invalid_reason
+      )
       setRecent(all.slice(0, 6))
 
       const buy = all.filter((r) => r.recommendation === 'BUY').length

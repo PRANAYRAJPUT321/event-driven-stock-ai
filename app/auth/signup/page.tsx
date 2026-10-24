@@ -1,9 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { createClient, describeAuthError, isSupabaseConfigured } from '@/lib/supabase/client'
+import { createClient, describeAuthError, getSessionUser, isSupabaseConfigured } from '@/lib/supabase/client'
 import ThemeToggle from '@/components/ui/ThemeToggle'
-import { getAppSession } from '@/lib/appSession'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
@@ -18,7 +17,9 @@ export default function SignUp() {
   // Whether accounts can be reached at all; null until known.
   const [accounts, setAccounts] = useState<boolean | null>(isSupabaseConfigured ? null : false)
   useEffect(() => {
-    getAppSession().then((s) => setAccounts(s.canSignIn)).catch(() => setAccounts(false))
+    // Asked of the server directly: the shared session check answers
+    // guests instantly and only learns this in the background.
+    getSessionUser().then((s) => setAccounts(!s.backendDown)).catch(() => setAccounts(false))
   }, [])
 
   const handleSignUp = async (e: React.FormEvent) => {

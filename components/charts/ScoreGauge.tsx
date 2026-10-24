@@ -6,9 +6,9 @@ import { useEffect, useState } from 'react'
 // gauge re-tints with light/dark instead of glowing dark-mode neon on white.
 function zoneMeta(score: number) {
   if (score >= 90) return { color: 'var(--buy)', label: 'Very Strong' }
-  if (score >= 75) return { color: 'var(--buy)', label: 'Strong' }
+  if (score >= 70) return { color: 'var(--buy)', label: 'Strong' }
   if (score >= 60) return { color: 'var(--hold)', label: 'Moderate' }
-  if (score >= 40) return { color: 'var(--hold)', label: 'Neutral' }
+  if (score >= 50) return { color: 'var(--hold)', label: 'Neutral' }
   return { color: 'var(--avoid)', label: 'Weak' }
 }
 

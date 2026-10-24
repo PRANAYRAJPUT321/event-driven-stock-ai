@@ -55,9 +55,15 @@ export function calculateCompositeScore(
 
 export type Recommendation = 'BUY' | 'HOLD' | 'AVOID' | 'UNRATED'
 
+/**
+ * 50 is "no edge either way" on every factor, so AVOID starts below it, not
+ * at 59: a near-neutral composite labelled AVOID read as a verdict the
+ * evidence did not support. The bands match the narrative's own wording —
+ * 70 and above "supports acting on the event", below 50 "does not".
+ */
 export function scoreToRecommendation(score: number): 'BUY' | 'HOLD' | 'AVOID' {
-  if (score >= 75) return 'BUY'
-  if (score >= 60) return 'HOLD'
+  if (score >= 70) return 'BUY'
+  if (score >= 50) return 'HOLD'
   return 'AVOID'
 }
 
@@ -93,9 +99,9 @@ export function recommendationFromComposite(result: CompositeResult): Recommenda
 
 export function scoreToOpportunityLevel(score: number): string {
   if (score >= 90) return 'Very Strong Opportunity'
-  if (score >= 75) return 'Strong Opportunity'
+  if (score >= 70) return 'Strong Opportunity'
   if (score >= 60) return 'Moderate Opportunity'
-  if (score >= 40) return 'Neutral'
+  if (score >= 50) return 'Neutral'
   return 'Weak'
 }
 

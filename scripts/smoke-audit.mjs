@@ -16,6 +16,26 @@ const report = (line) => {
 
 report(`# Audit — ${BASE} — ${new Date().toISOString()}`)
 
+// Wait for the build under test: the app's own 404 page ships with it, so
+// until that text appears production is still serving the previous build.
+{
+  const deadline = Date.now() + 15 * 60_000
+  for (;;) {
+    const html = await fetch(BASE + '/no-such-page', { signal: AbortSignal.timeout(30000) })
+      .then((r) => r.text())
+      .catch(() => '')
+    if (html.includes('nothing at this address')) {
+      report('new build is live')
+      break
+    }
+    if (Date.now() > deadline) {
+      report('NEW BUILD NOT LIVE after 15 minutes — results below are for the previous build')
+      break
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20_000))
+  }
+}
+
 // ── 1. Analysis battery ──
 const EVENTS = [
   'Crude oil crashed by 25%', 'Crude oil prices rise', 'Brent crude jumps 10% after supply cuts in the Middle East',
@@ -28,6 +48,8 @@ const EVENTS = [
   'Maruti Suzuki car sales jump 20% in October', 'Airtel raises mobile tariffs by 15%', 'Sun Pharma gets USFDA warning letter',
   'Infosys CEO resigns', 'Inflation rises to 7%', 'GDP growth slows to 5.4%', 'Monsoon rainfall at 92% of long period average',
   'I love you', 'I love HDFC Bank', 'Should I buy Reliance?', 'Tata Motors', 'Quarterly results season begins', 'hello',
+  'Crude oil prices', 'Reliance Power shares surge 10%', 'Tech Mahindra wins a $500 million deal', 'OPEC+ announces output cut',
+  'GST on cars cut from 28% to 18%', 'Union Budget raises railway capex by 20%', 'आरबीआई ने रेपो रेट घटाया',
 ]
 for (const event of EVENTS) {
   const t0 = Date.now()

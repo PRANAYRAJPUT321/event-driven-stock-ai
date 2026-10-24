@@ -51,7 +51,51 @@ export function getAppSession(): Promise<AppSession> {
   return inFlight
 }
 
+const REACHABLE_KEY = 'pulse-accounts-reachable'
+
+/**
+ * Whether this browser holds a Supabase sign-in at all. @supabase/ssr keeps
+ * the session in `sb-<project>-auth-token` cookies (chunked as .0, .1 when
+ * long); older builds used localStorage under the same name.
+ */
+function hasStoredSignIn(): boolean {
+  try {
+    if (/(?:^|;\s*)sb-[^=]*-auth-token(?:\.\d+)?=/.test(document.cookie)) return true
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i) || ''
+      if (key.startsWith('sb-') && key.endsWith('-auth-token')) return true
+    }
+  } catch {}
+  return false
+}
+
 async function resolveSession(): Promise<AppSession> {
+  // A visitor who never signed in is a guest, and knowing that needs no
+  // network. Every page used to wait on a round trip to the server's health
+  // check (and from there to the database) before loading its own data —
+  // seconds on a phone, on every navigation, for an answer that was always
+  // going to be "guest".
+  if (!hasStoredSignIn()) {
+    mode = 'guest'
+    let canSignIn = false
+    try {
+      canSignIn = sessionStorage.getItem(REACHABLE_KEY) === '1'
+    } catch {}
+    // Whether "Sign in" is worth offering is found out in the background and
+    // remembered for the rest of the visit.
+    if (!probing) {
+      probing = true
+      getSessionUser()
+        .then(({ backendDown }) => {
+          try {
+            sessionStorage.setItem(REACHABLE_KEY, backendDown ? '0' : '1')
+          } catch {}
+        })
+        .catch(() => {})
+    }
+    return { user: guestUser(), guest: true, canSignIn }
+  }
+
   const { user, backendDown } = await getSessionUser()
   if (user) {
     mode = 'cloud'
@@ -60,6 +104,8 @@ async function resolveSession(): Promise<AppSession> {
   mode = 'guest'
   return { user: guestUser(), guest: true, canSignIn: !backendDown }
 }
+
+let probing = false
 
 /** The data source for the current session: Supabase or this browser. */
 export function db(): any {

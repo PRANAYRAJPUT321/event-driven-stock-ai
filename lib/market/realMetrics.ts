@@ -415,15 +415,20 @@ export async function fetchStockMetricsMany(
   const out = new Map<string, StockMetrics>()
   if (candidates.length === 0) return out
 
+  // The screener row and each year of closes are independent requests, so
+  // they go out together rather than one after the other.
   let rows = new Map<string, TvRow>()
   let screenerError: string | null = null
-  try {
-    rows = await tvScan('india', candidates.map((c) => tvTicker(c.symbol)), PROFILE_COLUMNS, { ttlSeconds: 120 })
-  } catch (err: any) {
-    screenerError = err?.message || 'screener unavailable'
-  }
-
-  const closes = await mapWithConcurrency(candidates, 6, (c) => yearOfCloses(c.symbol))
+  const [, closes] = await Promise.all([
+    tvScan('india', candidates.map((c) => tvTicker(c.symbol)), PROFILE_COLUMNS, { ttlSeconds: 120 })
+      .then((r) => {
+        rows = r
+      })
+      .catch((err: any) => {
+        screenerError = err?.message || 'screener unavailable'
+      }),
+    mapWithConcurrency(candidates, 12, (c) => yearOfCloses(c.symbol)),
+  ])
 
   const fallbacks: { symbol: string; name: string; sector: string }[] = []
   candidates.forEach((c, i) => {
@@ -468,4 +473,61 @@ export async function fetchStockMetrics(
       notes: ['No market data could be fetched for this stock'],
     }
   )
+}
+
+export interface ValuationBenchmark {
+  pe: number | null
+  pb: number | null
+  /** Where the benchmark came from, for the page to say what it compared against. */
+  basis: string
+}
+
+function medianOf(values: number[]): number | null {
+  const sorted = values.filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b)
+  if (sorted.length === 0) return null
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+}
+
+/**
+ * What each company's valuation is judged against: the median multiple of
+ * its own sector within the NIFTY 50, or of the whole index when the sector
+ * has fewer than three members with data.
+ *
+ * The benchmark used to be the median of whichever companies an analysis
+ * happened to score, so on a crude-oil event IndiGo's P/E was compared with
+ * ONGC's and two carmakers', and an airline scored 3/100 on valuation for not
+ * being priced like an oil producer.
+ */
+export async function valuationBenchmarks(
+  universe: { symbol: string; sector: string }[]
+): Promise<(sector: string) => ValuationBenchmark> {
+  let rows = new Map<string, TvRow>()
+  try {
+    // One request for the whole index, cached for an hour: multiples move
+    // slowly, and every analysis shares the answer.
+    rows = await tvScan('india', universe.map((c) => tvTicker(c.symbol)), PROFILE_COLUMNS, { ttlSeconds: 3600 })
+  } catch {
+    // Without the index, there is no benchmark; valuation is then left out
+    // of the composite rather than scored against an invented one.
+  }
+  const values = universe.map((c) => {
+    const row = rows.get(tvTicker(c.symbol))
+    return { sector: c.sector, pe: tvNum(row?.price_earnings_ttm), pb: tvNum(row?.price_book_ratio) }
+  })
+  const all = {
+    pe: medianOf(values.map((v) => v.pe ?? NaN)),
+    pb: medianOf(values.map((v) => v.pb ?? NaN)),
+  }
+  return (sector: string) => {
+    const peers = values.filter((v) => v.sector === sector)
+    const pes = peers.map((v) => v.pe ?? NaN).filter((v) => v > 0)
+    const pbs = peers.map((v) => v.pb ?? NaN).filter((v) => v > 0)
+    const own = pes.length >= 3
+    return {
+      pe: own ? medianOf(pes) : all.pe,
+      pb: pbs.length >= 3 ? medianOf(pbs) : all.pb,
+      basis: own ? `${sector} companies in the NIFTY 50` : 'the NIFTY 50',
+    }
+  }
 }

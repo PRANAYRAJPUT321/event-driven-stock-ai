@@ -9,6 +9,7 @@ import AppShell from '@/components/layout/AppShell'
 import RecommendationBadge from '@/components/ui/RecommendationBadge'
 import ScoreChip from '@/components/ui/ScoreChip'
 import { formatDateIST } from '@/lib/format'
+import { isStaleGuestAnalysis, refreshGuestAnalysis } from '@/lib/guestDb'
 import type { User } from '@supabase/supabase-js'
 
 interface AnalysisRow {
@@ -18,6 +19,8 @@ interface AnalysisRow {
   opportunity_score: number | null
   affected_sectors: string[] | null
   created_at: string
+  engine_version?: number
+  invalid_reason?: string | null
 }
 
 const FILTERS = ['ALL', 'BUY', 'HOLD', 'AVOID'] as const
@@ -46,14 +49,25 @@ export default function History() {
       const { user } = await getAppSession()
       setUser(user)
 
-      const { data, error } = await db()
-        .from('event_analysis')
-        .select('id, event_title, recommendation, opportunity_score, affected_sectors, created_at')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
+      const query = () =>
+        db()
+          .from('event_analysis')
+          .select('id, event_title, recommendation, opportunity_score, affected_sectors, created_at, engine_version, invalid_reason')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+      const { data, error } = await query()
 
       if (!error) setRows(data || [])
       setLoading(false)
+
+      // Analyses this browser saved with an earlier engine are re-run in the
+      // background, one at a time, so the list shows today's answers.
+      const stale = ((data || []) as AnalysisRow[]).filter(isStaleGuestAnalysis)
+      if (isGuestMode() && stale.length > 0) {
+        for (const row of stale.slice(0, 12)) await refreshGuestAnalysis(row)
+        const { data: fresh } = await query()
+        setRows(fresh || [])
+      }
     }
     load()
   }, [])
@@ -138,8 +152,16 @@ export default function History() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0 ml-4">
-                  <ScoreChip score={row.opportunity_score} size="sm" />
-                  <RecommendationBadge rec={row.recommendation} size="sm" />
+                  {row.invalid_reason ? (
+                    <span className="text-[11px] font-mono uppercase tracking-wide text-hold" title={row.invalid_reason}>
+                      Not an event
+                    </span>
+                  ) : (
+                    <>
+                      <ScoreChip score={row.opportunity_score} size="sm" />
+                      <RecommendationBadge rec={row.recommendation} size="sm" />
+                    </>
+                  )}
                 </div>
                 </button>
                 <button

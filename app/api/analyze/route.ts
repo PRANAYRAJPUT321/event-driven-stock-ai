@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/server'
 import { classifyEvent, generateCounterArgument } from '@/lib/ai/eventClassifier'
-import { buildCounterArgumentFromRules, classifyEventByRules } from '@/lib/ai/ruleClassifier'
+import { assessEvent, buildCounterArgumentFromRules, type EventAssessment } from '@/lib/ai/ruleClassifier'
 import { analyseImpact, impactScore, type ImpactDirection } from '@/lib/ai/impactAnalyzer'
-import { fetchStockMetricsMany, type StockMetrics } from '@/lib/market/realMetrics'
+import { fetchStockMetricsMany, valuationBenchmarks, type StockMetrics } from '@/lib/market/realMetrics'
 import {
   getHistoricalReactions,
   historicalReturnToScore,
@@ -19,7 +19,6 @@ import {
 import {
   calculateCompositeFromAvailable,
   riskScoreToLevel,
-  median,
   scoreFundamental,
   scoreRisk,
   scoreTechnical,
@@ -59,28 +58,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Please keep the event to a short description (under 2,000 characters).' }, { status: 400 })
     }
 
-    // Text that names no market channel, no sector and no company is not an
-    // event the engine can trace — "I love you" used to fall through to a
-    // catch-all "Diversified" sector and come back as a HOLD on Adani
-    // Enterprises with a 62 score. Say so instead of inventing a call.
-    const ruleRead = classifyEventByRules(event)
-    const words = event.trim().split(/\s+/).filter((w: string) => /[a-z0-9]/i.test(w))
-    const nothingRecognised =
-      ruleRead.event_type === 'OTHER' &&
-      ruleRead.affected_sectors.length === 1 &&
-      ruleRead.affected_sectors[0] === 'Diversified'
-    if (requestedSymbols.length === 0 && (words.length < 2 || nothingRecognised)) {
-      return NextResponse.json(
-        {
-          code: 'NOT_AN_EVENT',
-          error:
-            `“${event.trim().slice(0, 60)}” doesn’t look like a market event, so there is nothing to trace to stocks. ` +
-            'Describe something that moves markets — a policy decision, a commodity or currency move, ' +
-            'company results, or economic data. For example: “RBI cuts the repo rate by 25 bps”.',
-        },
-        { status: 422 }
-      )
-    }
+    // Text the engine cannot trace is refused with the reason, instead of
+    // being scored anyway: "I love you" used to fall through to a catch-all
+    // "Diversified" sector and come back as a HOLD on Adani Enterprises, and
+    // "Crude oil crashed by 25%" — whose verb the rules did not know — as a
+    // crude SPIKE. See assessEvent for each verdict.
+    const assessment = assessEvent(event)
+    const ruleRead = assessment.classification
+    const refusal = refusalFor(event, assessment, requestedSymbols.length > 0)
+    if (refusal) return NextResponse.json(refusal, { status: 422 })
 
     // Whether we can persist is a separate question from whether we can
     // analyse. Nothing in the analysis below needs a database: classification
@@ -171,8 +157,25 @@ export async function POST(request: NextRequest) {
       .filter((e): e is EquityConstituent => e !== undefined)
     const unknownSymbols = requestedSymbols.filter((symbol) => !findEquity(symbol))
 
+    // News about particular companies is scored on those companies; a macro
+    // event on its sectors, with any company the text names kept in. Peers
+    // used to be scored with the named company's own event read, which put
+    // Infosys at the top of "TCS announces a buyback".
     const candidates: EquityConstituent[] =
-      requested.length > 0 ? requested : equitiesForSectors(sectors, MAX_STOCKS_ANALYZED)
+      requested.length > 0
+        ? requested
+        : assessment.scope === 'company' && assessment.companies.length > 0
+          ? assessment.companies.slice(0, MAX_STOCKS_REQUESTED)
+          : Array.from(
+              new Map(
+                [
+                  ...assessment.companies,
+                  ...(assessment.focus.length > 0
+                    ? assessment.focus.map((s) => findEquity(s)).filter((e): e is EquityConstituent => !!e)
+                    : equitiesForSectors(sectors, MAX_STOCKS_ANALYZED)),
+                ].map((c) => [c.symbol, c])
+              ).values()
+            ).slice(0, Math.max(MAX_STOCKS_ANALYZED, assessment.companies.length))
     // Named by the classification but absent from this universe — reported so
     // the page can say "no NIFTY 50 name is exposed to Aviation" rather than
     // quietly showing an unrelated company in its place.
@@ -240,14 +243,17 @@ export async function POST(request: NextRequest) {
 
     // One screener request covers every candidate's price, valuation and
     // fundamentals; each also gets a year of daily closes for volatility.
-    const metricsBySymbol: Map<string, StockMetrics> = await fetchStockMetricsMany(candidates)
-
-    // Valuation is relative, so the benchmark is the median of the peers
-    // actually in this analysis — measured, rather than a hardcoded sector
-    // table of assumed multiples.
-    const allMetrics = candidates.map((c) => metricsBySymbol.get(c.symbol) ?? null)
-    const peerMedianPe = median(allMetrics.map((m) => m?.valuation?.peRatio ?? null))
-    const peerMedianPb = median(allMetrics.map((m) => m?.valuation?.pbRatio ?? null))
+    // Valuation is relative, so each company is measured against its own
+    // sector's median multiple in the NIFTY 50 (the whole index for sectors
+    // too small to have one) — measured, not a hardcoded table, and not the
+    // mix of unrelated companies a single event happens to touch.
+    const [metricsBySymbol, benchmarkFor] = await Promise.all([
+      fetchStockMetricsMany(candidates) as Promise<Map<string, StockMetrics>>,
+      valuationBenchmarks(NIFTY_50),
+    ])
+    const indexBenchmark = benchmarkFor('')
+    const peerMedianPe = indexBenchmark.pe
+    const peerMedianPb = indexBenchmark.pb
 
     const stockResults = candidates.map((stock) => {
       const metrics = metricsBySymbol.get(stock.symbol) ?? null
@@ -255,7 +261,8 @@ export async function POST(request: NextRequest) {
       const sectorHistory = historyBySector.get(stock.sector) ?? null
 
       const fundamentalScore = scoreFundamental(metrics?.fundamental ?? null)
-      const valuationScore = scoreValuation(metrics?.valuation ?? null, peerMedianPe, peerMedianPb)
+      const benchmark = benchmarkFor(stock.sector)
+      const valuationScore = scoreValuation(metrics?.valuation ?? null, benchmark.pe, benchmark.pb)
       const technicalScore = scoreTechnical(metrics?.technical ?? null)
       const riskScoreValue = scoreRisk(metrics?.risk ?? null)
 
@@ -449,5 +456,89 @@ export async function POST(request: NextRequest) {
       { error: error.message || 'Internal server error' },
       { status: 500 }
     )
+  }
+}
+
+/** Example events, by channel, for a refusal that asks for a direction. */
+const DIRECTION_EXAMPLES: Record<string, string> = {
+  crude: 'Crude oil falls 10% on weak demand',
+  gold: 'Gold prices rise 3% to a record high',
+  currency: 'Rupee falls to 90 against the dollar',
+  inflation: 'CPI inflation rises to 6.2%',
+  growth: 'GDP growth slows to 5.4%',
+  fiscal: 'Union Budget raises capital expenditure by 11%',
+  trade: 'US imposes 25% tariffs on Indian goods',
+  global: 'Wall Street sell-off deepens on recession fears',
+  market_move: 'Sensex falls 1,000 points',
+  monsoon: 'Monsoon rainfall forecast at 105% of the long-period average',
+  employment: 'Unemployment rises to 8%',
+  ratings: 'Moody’s upgrades India’s sovereign rating',
+}
+
+function quote(event: string): string {
+  const text = event.trim().replace(/\s+/g, ' ')
+  return `“${text.length > 60 ? text.slice(0, 57) + '…' : text}”`
+}
+
+/**
+ * Why an event cannot be analysed, in words a reader can act on, with the
+ * company pages it names so the answer is a way forward rather than a wall.
+ * null when the event is fine.
+ */
+function refusalFor(event: string, a: EventAssessment, symbolsChosen: boolean) {
+  const q = quote(event)
+  const suggestions = [
+    ...a.companies.map((c) => ({ symbol: c.symbol, name: c.name })),
+    ...a.outside.map((o) => ({ symbol: o.symbol, name: o.phrase.replace(/\b\w/g, (ch) => ch.toUpperCase()) })),
+  ].slice(0, 4)
+  const first = suggestions[0]
+  const make = (code: string, error: string) => ({ code, error, suggestions })
+
+  switch (a.verdict) {
+    case 'ok':
+      return null
+    case 'non_english':
+      return make('NOT_AN_EVENT', 'PULSE reads events written in English. Try, for example, “RBI cuts the repo rate by 25 bps”.')
+    case 'not_event':
+      return make(
+        'NOT_AN_EVENT',
+        first
+          ? `${q} names ${first.name} but doesn’t describe anything that happened, so there is no event to trace. ` +
+              `Open ${first.name} for its live price, chart and financials, or describe an event — for example “${first.name} Q2 profit rises 12%”.`
+          : `${q} doesn’t look like a market event, so there is nothing to trace to stocks. ` +
+              'Describe something that moves markets — a policy decision, a commodity or currency move, company results, or economic data. ' +
+              'For example: “RBI cuts the repo rate by 25 bps”.'
+      )
+    case 'needs_company':
+      return symbolsChosen
+        ? null
+        : make(
+            'NEEDS_COMPANY',
+            `${q} reads as ${a.label}${/news$/.test(a.label ?? '') ? '' : ' news'} but doesn’t name a company, and this kind of event reaches only the company it is about. ` +
+              'Name one of the NIFTY 50 companies PULSE scores — for example “Infosys Q2 profit beats estimates”.'
+          )
+    case 'outside_universe':
+      return make(
+        'OUTSIDE_UNIVERSE',
+        `${a.outside.map((o) => o.phrase.replace(/\b\w/g, (ch) => ch.toUpperCase())).join(', ')} ` +
+          `${a.outside.length > 1 ? 'are' : 'is'} not in the NIFTY 50, the universe PULSE scores against events. ` +
+          'Its live chart and financials are on its company page.'
+      )
+    case 'no_direction':
+      return make(
+        'NO_DIRECTION',
+        `PULSE recognised the ${a.label} channel, but ${q} doesn’t say which way it moved — and the companies it reaches gain or lose depending on that. ` +
+          `Add the direction, for example “${
+            a.channel === 'company_news' && first ? `${first.name} shares jump 8% on a new order` : DIRECTION_EXAMPLES[a.channel ?? ''] ?? 'RBI cuts the repo rate by 25 bps'
+          }”.`
+      )
+    case 'no_sector':
+      return symbolsChosen
+        ? null
+        : make(
+            'NO_SECTOR',
+            `PULSE recognised ${q} as ${a.label}${/news$/.test(a.label ?? '') ? '' : ' news'} but couldn’t connect it to a NIFTY 50 sector. ` +
+              'Name the sector or company it affects — for example “…; impact on FMCG companies”.'
+          )
   }
 }

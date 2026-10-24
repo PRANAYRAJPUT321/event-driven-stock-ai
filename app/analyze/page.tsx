@@ -22,16 +22,23 @@ interface NewsSource {
 const EXAMPLES = [
   'RBI cuts the repo rate by 25 basis points to support growth',
   'Brent crude jumps 10% after supply cuts in the Middle East',
+  'Infosys Q2 profit beats estimates and raises guidance',
   'Rupee falls past 97 against the US dollar',
   'Government raises capital-expenditure outlay in the Union Budget',
   'US Fed signals higher-for-longer interest rates',
   'Monsoon rainfall forecast at 105% of the long-period average',
+  'Sensex falls 1,000 points on heavy foreign selling',
 ]
+
+/** Longest event the engine accepts; the API refuses anything longer. */
+const MAX_EVENT_LENGTH = 2000
 
 function AnalyzeForm() {
   const [eventText, setEventText] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  // Companies a refused text named, offered as a way forward.
+  const [suggestions, setSuggestions] = useState<{ symbol: string; name: string }[]>([])
   const [newsSource, setNewsSource] = useState<NewsSource | null>(null)
   // Set when an analysis completed but could not be stored — the result is
   // rendered in place instead of redirecting to a saved page that does not
@@ -82,6 +89,7 @@ function AnalyzeForm() {
 
     setLoading(true)
     setError('')
+    setSuggestions([])
 
     try {
       const response = await fetch('/api/analyze', {
@@ -93,8 +101,11 @@ function AnalyzeForm() {
         }),
       })
 
-      const data = await response.json()
-      if (!response.ok) throw new Error(data.error || 'Analysis failed')
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setSuggestions(Array.isArray(data.suggestions) ? data.suggestions : [])
+        throw new Error(data.error || 'The analysis could not be completed. Please try again.')
+      }
       if (data.persisted && data.analysisId) {
         router.push(`/events/${data.analysisId}`)
         return
@@ -167,8 +178,21 @@ function AnalyzeForm() {
           )}
 
           {error && (
-            <div className="bg-avoid-dim border border-avoid-dim text-avoid px-4 py-3 rounded-lg mb-6 text-sm">
-              {error}
+            <div role="alert" className="bg-avoid-dim border border-avoid-dim text-avoid px-4 py-3 rounded-lg mb-6 text-sm">
+              <p>{error}</p>
+              {suggestions.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {suggestions.map((s) => (
+                    <a
+                      key={s.symbol}
+                      href={`/stocks/${encodeURIComponent(s.symbol)}`}
+                      className="inline-flex items-center rounded-full border border-border bg-surface px-3 py-1 text-xs font-medium text-ink hover:border-accent hover:text-accent transition"
+                    >
+                      Open {s.name} →
+                    </a>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -177,16 +201,29 @@ function AnalyzeForm() {
               <label className="block text-xs font-medium text-ink-muted mb-2 uppercase tracking-wide">Financial Event</label>
               <textarea
                 value={eventText}
-                onChange={(e) => setEventText(e.target.value)}
+                maxLength={MAX_EVENT_LENGTH}
+                onChange={(e) => {
+                  setEventText(e.target.value)
+                  if (error) setError('')
+                }}
                 placeholder="Example: RBI increases repo rate by 25 basis points to control inflation"
                 className="w-full h-32 px-4 py-3 bg-surface border border-border rounded-lg text-sm text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent-dim focus:border-accent resize-none transition"
               />
-              <p className="text-ink-faint text-xs mt-2">Paste news, a press release, or describe the event in your own words</p>
+              <div className="flex items-start justify-between gap-3 mt-2">
+                <p className="text-ink-faint text-xs">
+                  Describe something that happened — a policy decision, a price move, company results — or paste a headline.
+                </p>
+                {eventText.length > MAX_EVENT_LENGTH * 0.8 && (
+                  <span className="text-ink-faint text-xs font-mono shrink-0">
+                    {eventText.length}/{MAX_EVENT_LENGTH}
+                  </span>
+                )}
+              </div>
             </div>
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !eventText.trim()}
               className="w-full bg-accent hover:bg-accent-bright disabled:opacity-50 text-on-accent font-semibold py-3 px-6 rounded-lg transition"
             >
               {loading ? 'Classifying event, scoring stocks…' : 'Analyze Event'}
@@ -201,7 +238,11 @@ function AnalyzeForm() {
                 {EXAMPLES.map((event, idx) => (
                   <button
                     key={idx}
-                    onClick={() => setEventText(event)}
+                    onClick={() => {
+                      setEventText(event)
+                      setError('')
+                      setSuggestions([])
+                    }}
                     className="text-left p-3 bg-surface border border-border rounded-lg hover:border-border-bright hover:bg-surface-hover transition"
                   >
                     <p className="text-sm text-ink-muted">{event}</p>

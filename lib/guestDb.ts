@@ -254,28 +254,37 @@ export function guestHasData(): boolean {
  * Stores an analysis the API returned unsaved (no account) as guest rows in
  * the same shape the database uses, and returns its id for /events/[id].
  */
-export async function saveGuestAnalysis(result: any): Promise<string> {
+/**
+ * Bumped whenever the analysis engine changes what it would answer, so
+ * analyses saved in this browser by an older engine are re-run when opened
+ * instead of showing a read the app no longer stands behind.
+ */
+export const ENGINE_VERSION = 2
+
+function analysisFields(result: any): Row {
   const top = result.stocks?.[0]
-  const { data: analysis } = await guestDb
-    .from('event_analysis')
-    .insert({
-      user_id: 'guest',
-      event_title: result.eventTitle,
-      affected_sectors: result.classification?.affected_sectors ?? [],
-      opportunity_score: top?.opportunityScore ?? result.classification?.magnitude ?? 0,
-      composite_score: top?.opportunityScore ?? null,
-      recommendation: top?.recommendation ?? null,
-      bull_case: result.counterArgument?.bullCase ?? null,
-      bear_case: result.counterArgument?.bearCase ?? null,
-      contradictory_evidence: result.counterArgument?.contradictoryEvidence ?? null,
-      risks: result.counterArgument?.keyRisks ?? [],
-      historical_summary: result.historical ?? null,
-      analysis_json: result.classification,
-    })
-    .select()
-    .single()
-  const id = analysis.id as string
-  const rows = (result.stocks || []).map((s: any) => ({
+  return {
+    event_title: result.eventTitle,
+    affected_sectors: result.classification?.affected_sectors ?? [],
+    opportunity_score: top?.opportunityScore ?? result.classification?.magnitude ?? 0,
+    composite_score: top?.opportunityScore ?? null,
+    recommendation: top?.recommendation ?? null,
+    bull_case: result.counterArgument?.bullCase ?? null,
+    bear_case: result.counterArgument?.bearCase ?? null,
+    contradictory_evidence: result.counterArgument?.contradictoryEvidence ?? null,
+    risks: result.counterArgument?.keyRisks ?? [],
+    historical_summary: result.historical ?? null,
+    analysis_json: result.classification,
+    engine_version: ENGINE_VERSION,
+    invalid_reason: null,
+    // The companies the reader chose, so a re-run scores the same ones.
+    requested_symbols:
+      result.selectionMode === 'requested' ? (result.stocks || []).map((s: any) => s.symbol) : null,
+  }
+}
+
+function scoreRows(id: string, result: any): Row[] {
+  return (result.stocks || []).map((s: any) => ({
     event_analysis_id: id,
     stock_id: s.symbol,
     stock_symbol: s.symbol,
@@ -290,6 +299,70 @@ export async function saveGuestAnalysis(result: any): Promise<string> {
     recommendation: s.recommendation,
     confidence: result.classification?.confidence ?? null,
   }))
+}
+
+export async function saveGuestAnalysis(result: any): Promise<string> {
+  const { data: analysis } = await guestDb
+    .from('event_analysis')
+    .insert({ user_id: 'guest', ...analysisFields(result) })
+    .select()
+    .single()
+  const id = analysis.id as string
+  const rows = scoreRows(id, result)
   if (rows.length > 0) await guestDb.from('stock_scores').insert(rows)
   return id
+}
+
+/**
+ * Re-runs a saved analysis with the current engine and rewrites it in
+ * place, keeping its id (and so its place in history and the portfolio).
+ * Text the current engine refuses is kept but marked, with the reason, so
+ * the page can say why instead of showing the old answer.
+ */
+export async function refreshGuestAnalysis(
+  row: Row
+): Promise<'updated' | 'invalid' | 'failed'> {
+  let response: Response
+  try {
+    response = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event: row.event_title,
+        ...(Array.isArray(row.requested_symbols) && row.requested_symbols.length > 0
+          ? { symbols: row.requested_symbols }
+          : {}),
+      }),
+    })
+  } catch {
+    return 'failed'
+  }
+  const data = await response.json().catch(() => ({}))
+  if (response.status === 422) {
+    await guestDb
+      .from('event_analysis')
+      .update({ engine_version: ENGINE_VERSION, invalid_reason: data.error || 'This text is not a market event.' })
+      .eq('id', row.id)
+    return 'invalid'
+  }
+  if (!response.ok || !data.result) return 'failed'
+  await guestDb.from('event_analysis').update(analysisFields(data.result)).eq('id', row.id)
+  await guestDb.from('stock_scores').delete().eq('event_analysis_id', row.id)
+  const rows = scoreRows(row.id, data.result)
+  if (rows.length > 0) {
+    const { data: inserted } = await guestDb.from('stock_scores').insert(rows).select()
+    // Paper positions opened from this analysis point at its score rows;
+    // re-point them at the new rows so they still show as "In Portfolio".
+    const bySymbol = new Map<string, string>(((inserted as Row[]) || []).map((r) => [r.stock_symbol, r.id]))
+    const { data: positions } = await guestDb.from('portfolio_positions').select('*').eq('event_analysis_id', row.id)
+    for (const position of (positions as Row[]) || []) {
+      const scoreId = bySymbol.get(position.symbol)
+      if (scoreId) await guestDb.from('portfolio_positions').update({ stock_scores_id: scoreId }).eq('id', position.id)
+    }
+  }
+  return 'updated'
+}
+
+export function isStaleGuestAnalysis(row: Row | null | undefined): boolean {
+  return !!row && (row.engine_version ?? 1) < ENGINE_VERSION
 }

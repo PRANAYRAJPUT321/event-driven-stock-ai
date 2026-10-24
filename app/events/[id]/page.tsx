@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { db, getAppSession, isGuestMode } from '@/lib/appSession'
-import { saveGuestAnalysis } from '@/lib/guestDb'
+import { isStaleGuestAnalysis, refreshGuestAnalysis, saveGuestAnalysis } from '@/lib/guestDb'
 import BackendDownNotice from '@/components/BackendDownNotice'
 import { useRouter } from 'next/navigation'
 import AppShell from '@/components/layout/AppShell'
@@ -83,6 +83,8 @@ interface Analysis {
   historical_summary: HistoricalSummary | null
   analysis_json: ClassificationJson | null
   created_at: string
+  /** Set on a browser-saved analysis the current engine no longer accepts. */
+  invalid_reason?: string | null
 }
 
 const RISK_STYLE: Record<string, string> = {
@@ -110,6 +112,9 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   const [backendDown, setBackendDown] = useState(false)
   const [rescoring, setRescoring] = useState(false)
   const [rescoreError, setRescoreError] = useState<string | null>(null)
+  // A browser-saved analysis from an older engine is re-run on open.
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshed, setRefreshed] = useState(false)
   const supabase = createClient()
 
   /** Scores the same event against the reader's chosen companies, as a new saved analysis. */
@@ -141,7 +146,8 @@ export default function EventDetails({ params }: { params: { id: string } }) {
   }
 
   useEffect(() => {
-    const fetchAnalysis = async () => {
+    let refreshAttempted = false
+    const fetchAnalysis = async (): Promise<void> => {
       try {
         const { user } = await getAppSession()
         setUserId(user.id)
@@ -152,6 +158,17 @@ export default function EventDetails({ params }: { params: { id: string } }) {
           .select('*')
           .eq('id', params.id)
           .single()
+
+        if (analysisData && isGuestMode() && !refreshAttempted && isStaleGuestAnalysis(analysisData)) {
+          // Saved by an earlier engine: re-run it so the page never shows a
+          // read the app no longer stands behind, then load the new one.
+          refreshAttempted = true
+          setRefreshing(true)
+          const outcome = await refreshGuestAnalysis(analysisData)
+          setRefreshing(false)
+          if (outcome === 'updated') setRefreshed(true)
+          if (outcome !== 'failed') return fetchAnalysis()
+        }
 
         if (analysisData) {
           setAnalysis(analysisData)
@@ -310,7 +327,9 @@ export default function EventDetails({ params }: { params: { id: string } }) {
       <div className="min-h-screen grid-backdrop flex items-center justify-center font-sans">
         <div className="text-center">
           <div className="live-dot mx-auto mb-4" />
-          <p className="text-ink-muted text-sm">Loading analysis…</p>
+          <p className="text-ink-muted text-sm">
+            {refreshing ? 'Updating this analysis with the latest engine…' : 'Loading analysis…'}
+          </p>
         </div>
       </div>
     )
@@ -318,14 +337,65 @@ export default function EventDetails({ params }: { params: { id: string } }) {
 
   if (!analysis) {
     return (
-      <div className="min-h-screen grid-backdrop flex items-center justify-center font-sans">
-        <div className="text-center">
-          <p className="text-avoid mb-4">Analysis not found</p>
-          <button onClick={() => router.push('/dashboard')} className="text-accent-bright hover:underline">
-            Back to Dashboard
-          </button>
+      <AppShell userEmail={user?.email} onLogout={handleLogout} showTicker={false}>
+        <div className="max-w-xl mx-auto panel-elevated p-8 text-center fade-in">
+          <p className="text-xs font-mono uppercase tracking-widest text-accent-bright mb-2">Analysis not found</p>
+          <h1 className="text-xl font-bold text-ink mb-3">This analysis isn’t saved in this browser</h1>
+          <p className="text-sm text-ink-muted mb-6">
+            Analyses made without an account are kept on the device and browser that made them, so a link opened
+            elsewhere — or after clearing site data — has nothing to show. Run the event again to see it here.
+          </p>
+          <div className="flex flex-wrap justify-center gap-3">
+            <button
+              onClick={() => router.push('/analyze')}
+              className="bg-accent hover:bg-accent-bright text-on-accent font-semibold px-5 py-2.5 rounded-lg text-sm transition"
+            >
+              Analyze an event
+            </button>
+            <button
+              onClick={() => router.push('/history')}
+              className="border border-border hover:border-accent text-ink px-5 py-2.5 rounded-lg text-sm transition"
+            >
+              Your history
+            </button>
+          </div>
         </div>
-      </div>
+      </AppShell>
+    )
+  }
+
+  if (analysis.invalid_reason) {
+    const remove = async () => {
+      await db().from('stock_scores').delete().eq('event_analysis_id', analysis.id)
+      await db().from('event_analysis').delete().eq('id', analysis.id)
+      router.push('/history')
+    }
+    return (
+      <AppShell userEmail={user?.email} onLogout={handleLogout} showTicker={false}>
+        <div className="max-w-xl mx-auto panel-elevated p-8 fade-in">
+          <p className="text-xs font-mono uppercase tracking-widest text-hold mb-2">Analysis withdrawn</p>
+          <h1 className="text-xl font-bold text-ink mb-3 break-words">“{analysis.event_title}”</h1>
+          <p className="text-sm text-ink-muted mb-3">
+            An earlier version of PULSE scored this text. The current engine checks first that an event can actually be
+            traced to stocks, and it can’t be here:
+          </p>
+          <p className="text-sm text-ink bg-surface border border-border rounded-lg p-4 mb-6">{analysis.invalid_reason}</p>
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={remove}
+              className="bg-accent hover:bg-accent-bright text-on-accent font-semibold px-5 py-2.5 rounded-lg text-sm transition"
+            >
+              Remove from history
+            </button>
+            <button
+              onClick={() => router.push('/analyze')}
+              className="border border-border hover:border-accent text-ink px-5 py-2.5 rounded-lg text-sm transition"
+            >
+              Analyze an event
+            </button>
+          </div>
+        </div>
+      </AppShell>
     )
   }
 
@@ -334,6 +404,12 @@ export default function EventDetails({ params }: { params: { id: string } }) {
 
   return (
     <AppShell userEmail={user?.email} onLogout={handleLogout} showTicker={false}>
+      {refreshed && (
+        <div role="status" className="mb-4 rounded-lg border border-accent-dim bg-accent-dim/30 px-4 py-3 text-sm text-ink-muted">
+          This analysis was saved by an earlier version of PULSE and has been re-run with the current engine and today’s
+          market data.
+        </div>
+      )}
       <div className="flex justify-end items-center gap-3 mb-4">
         <button
           onClick={() => router.push('/portfolio')}

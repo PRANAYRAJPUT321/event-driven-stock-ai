@@ -1,4 +1,4 @@
-import { classifyEventByRules, polarityFor, type Polarity } from './ruleClassifier'
+import { assessEvent, type Polarity } from './ruleClassifier'
 
 /**
  * Two-sided impact analysis for a news item.
@@ -91,7 +91,7 @@ const CHANNEL_IMPACTS: Record<string, Partial<Record<Polarity, SidedImpact>>> = 
       ],
       negatives: [
         { text: 'Lending yields fall faster than deposit costs, compressing net interest margin in the near term.', sectors: ['Banking'] },
-        { text: 'New money is invested at lower yields, trimming insurers’ and lenders’ investment income over time.', sectors: ['Banking', 'Financials'] },
+        { text: 'New money is invested at lower yields, trimming insurers’ investment income over time.', sectors: ['Financials'] },
         { text: 'A narrower rate differential can weaken the rupee, raising the cost of imported inputs and dollar debt.', sectors: ['Energy', 'Chemicals'] },
         { text: 'Easing usually signals concern about growth, so the volume recovery may lag the rate cut considerably.', sectors: [] },
       ],
@@ -204,7 +204,7 @@ const CHANNEL_IMPACTS: Record<string, Partial<Record<Polarity, SidedImpact>>> = 
       ],
       negatives: [
         { text: 'A wider fiscal deficit pushes up government borrowing and therefore bond yields.', sectors: ['Banking', 'Financials'] },
-        { text: 'Execution lags mean announced spending can take several years to become revenue.', sectors: ['Engineering', 'Cement'] },
+        { text: 'Execution lags mean announced spending can take several years to become revenue.', sectors: [] },
         { text: 'Higher duties in the same package raise input costs for import-dependent manufacturers.', sectors: ['Auto', 'Chemicals'] },
       ],
     },
@@ -267,45 +267,12 @@ const CHANNEL_IMPACTS: Record<string, Partial<Record<Polarity, SidedImpact>>> = 
       mechanism: 'Slower growth weakens credit demand, order books and cyclical volumes together.',
       positives: [
         { text: 'Defensive demand holds up better and can outperform on a relative basis.', sectors: ['FMCG', 'Pharma', 'Utilities'] },
-        { text: 'A slowdown raises the likelihood of supportive policy easing.', sectors: ['Banking', 'Realty', 'Auto'] },
+        { text: 'A slowdown raises the likelihood of supportive policy easing.', sectors: [] },
       ],
       negatives: [
         { text: 'Credit demand weakens and borrower cash flows deteriorate, worsening the asset-quality outlook.', sectors: ['Banking', 'Financials'] },
         { text: 'Cyclical volumes and order inflows contract.', sectors: ['Metals', 'Cement', 'Engineering', 'Auto'] },
         { text: 'Discretionary spending is deferred first.', sectors: ['Consumer', 'Retail'] },
-      ],
-    },
-  },
-
-  regulatory: {
-    neutral: {
-      mechanism:
-        'Regulatory action raises compliance cost and caps a practice or a revenue line, and the overhang usually persists until the order’s scope is known.',
-      positives: [
-        { text: 'Incumbents with established compliance functions absorb the cost more easily than smaller competitors, consolidating share.', sectors: ['Banking', 'Financials', 'Pharma'] },
-        { text: 'Clearer rules remove an uncertainty that was already being discounted.', sectors: [] },
-      ],
-      negatives: [
-        { text: 'Compliance and remediation costs rise immediately and permanently.', sectors: ['Banking', 'Financials', 'Pharma', 'Telecom'] },
-        { text: 'A capped fee, tariff or practice removes a revenue line outright.', sectors: ['Banking', 'Telecom'] },
-        { text: 'The overhang suppresses the valuation multiple until the scope of the action is known.', sectors: [] },
-      ],
-    },
-  },
-
-  geopolitical: {
-    up: {
-      mechanism:
-        'Conflict and sanctions raise energy, freight and insurance costs and lengthen supply routes.',
-      positives: [
-        { text: 'Defence and domestic capital goods order books expand on higher security spending.', sectors: ['Engineering'] },
-        { text: 'Energy producers realise higher prices on the risk premium.', sectors: ['Energy'] },
-        { text: 'Gold and hard assets attract safe-haven flows.', sectors: [] },
-      ],
-      negatives: [
-        { text: 'Fuel, freight and insurance costs rise across every physical supply chain.', sectors: ['Aviation', 'Ports', 'Retail', 'Auto'] },
-        { text: 'Longer shipping routes stretch working capital and delivery times.', sectors: ['Chemicals', 'Metals', 'Ports'] },
-        { text: 'Risk premia rise market-wide, compressing valuations regardless of company fundamentals.', sectors: [] },
       ],
     },
   },
@@ -316,6 +283,7 @@ const CHANNEL_IMPACTS: Record<string, Partial<Record<Polarity, SidedImpact>>> = 
         'A good monsoon raises farm output and rural incomes, and rural India buys roughly half of the country’s consumer staples and two-wheelers.',
       positives: [
         { text: 'Rural volumes for soaps, biscuits, tea and other staples recover with farm incomes, and rural is the slower-growing half of the market.', sectors: ['FMCG'] },
+        { text: 'A big harvest cheapens farm inputs such as wheat, edible oils and milk, widening staples makers’ margins.', sectors: ['FMCG'] },
         { text: 'Tractor and two-wheeler demand tracks the harvest closely, so order books fill ahead of the festive season.', sectors: ['Auto'] },
         { text: 'More disposable income in rural households lifts discretionary purchases such as paint, jewellery and appliances.', sectors: ['Consumer'] },
         { text: 'Ample food supply cools inflation, which leaves room for lower interest rates.', sectors: ['Banking', 'Financials'] },
@@ -323,7 +291,6 @@ const CHANNEL_IMPACTS: Record<string, Partial<Record<Polarity, SidedImpact>>> = 
       ],
       negatives: [
         { text: 'How the rain is spread across regions and weeks matters as much as the seasonal total; a good average can hide local deficits.', sectors: [] },
-        { text: 'Cheaper agricultural raw materials lower realisations for companies that sell them.', sectors: ['FMCG'] },
       ],
     },
     down: {
@@ -342,35 +309,410 @@ const CHANNEL_IMPACTS: Record<string, Partial<Record<Polarity, SidedImpact>>> = 
     },
   },
 
-  earnings: {
-    up: {
-      mechanism: 'Reported results and guidance reset the forward estimates the market capitalises.',
+  // A hold is a channel in its own right, not "the hike side by default":
+  // that fallback used to give "RBI keeps the repo rate unchanged" the
+  // rate-HIKE read for every lender.
+  policy_rate_neutral: {
+    neutral: {
+      mechanism: 'Rates held steady leave funding costs and EMIs where they are, so the read comes from the guidance rather than the decision.',
       positives: [
-        { text: 'Forward earnings estimates are revised upward, which is what actually drives the re-rating.', sectors: [] },
-        { text: 'A beat driven by margin rather than one-offs tends to persist into following quarters.', sectors: [] },
+        { text: 'Lending margins face no repricing pressure in either direction this cycle.', sectors: ['Banking'] },
+        { text: 'Policy stability removes a swing factor and lets earnings drive prices.', sectors: [] },
       ],
       negatives: [
-        { text: 'If the beat was already expected, the result can be sold regardless of the numbers.', sectors: [] },
-        { text: 'One-off gains flatter a quarter without changing the earnings power of the business.', sectors: [] },
+        { text: 'Credit growth gets no boost from cheaper loans.', sectors: ['Banking'] },
+        { text: 'Borrowers waiting for cheaper EMIs wait longer, so rate-sensitive demand gets no new support.', sectors: ['Auto', 'Consumer', 'Realty'] },
+        { text: 'Bond-funded lenders get no relief on funding costs from a cut.', sectors: ['Financials'] },
+      ],
+    },
+  },
+
+  fed: {
+    up: {
+      mechanism: 'Higher US rates pull foreign money out of emerging markets, weaken the rupee and tighten global financing.',
+      positives: [
+        { text: 'A weaker rupee alongside the outflow lifts the rupee value of exporters’ dollar revenue.', sectors: ['IT', 'Pharma'] },
+      ],
+      negatives: [
+        { text: 'Foreign portfolio investors sell Indian equities as US yields rise, and banks and financials are their largest holdings.', sectors: ['Banking', 'Financials'] },
+        { text: 'Tighter global financing slows demand for industrial metals.', sectors: ['Metals'] },
+        { text: 'US clients trim discretionary technology budgets when borrowing costs rise.', sectors: ['IT'] },
+        { text: 'Higher global discount rates compress equity valuations broadly.', sectors: [] },
+      ],
+    },
+    down: {
+      mechanism: 'Lower US rates send foreign money back to emerging markets, support the rupee and ease global financing.',
+      positives: [
+        { text: 'Foreign portfolio inflows return to Indian equities, led by the large banks and financials they hold most.', sectors: ['Banking', 'Financials'] },
+        { text: 'Easier global financing supports industrial-metal demand.', sectors: ['Metals'] },
+        { text: 'Cheaper money supports US clients’ technology budgets.', sectors: ['IT'] },
+        { text: 'Lower global discount rates support equity valuations broadly.', sectors: [] },
+      ],
+      negatives: [
+        { text: 'A stronger rupee trims the rupee value of exporters’ dollar revenue.', sectors: ['IT', 'Pharma'] },
+      ],
+    },
+    neutral: {
+      mechanism: 'A US rate pause leaves foreign-flow conditions unchanged; the guidance on future moves carries the read.',
+      positives: [{ text: 'No new outflow pressure from a further rise in US yields.', sectors: ['Banking', 'Financials'] }],
+      negatives: [{ text: 'No relief either: foreign flows wait for the first cut.', sectors: ['Banking', 'Financials', 'IT'] }],
+    },
+  },
+
+  gold: {
+    up: {
+      mechanism: 'Higher gold prices revalue jewellers’ inventory but price buyers out, and usually mean investors are moving to safety.',
+      positives: [
+        { text: 'Jewellers hold large gold inventories, which are revalued upward and lift reported margins in the quarter.', sectors: ['=TITAN'] },
+      ],
+      negatives: [
+        { text: 'Buyers defer or downsize jewellery purchases at record prices, so volumes fall.', sectors: ['=TITAN'] },
+        { text: 'A gold rally usually reflects risk aversion, which is a headwind for equities broadly.', sectors: [] },
+      ],
+    },
+    down: {
+      mechanism: 'Cheaper gold brings jewellery buyers back and signals money moving from safe havens into risk assets.',
+      positives: [
+        { text: 'Lower prices bring jewellery buyers back, lifting volumes.', sectors: ['=TITAN'] },
+        { text: 'Money leaving safe havens tends to flow into equities.', sectors: [] },
+      ],
+      negatives: [
+        { text: 'Jewellers’ gold inventories are revalued lower, trimming reported margins in the quarter.', sectors: ['=TITAN'] },
+      ],
+    },
+  },
+
+  fiscal_tax: {
+    down: {
+      mechanism: 'A lower tax on consumption or income leaves households more to spend.',
+      positives: [
+        { text: 'Lower GST or income tax puts money back in household budgets, lifting volumes for everyday goods.', sectors: ['FMCG', 'Consumer', 'Retail'] },
+        { text: 'Big-ticket purchases such as vehicles become cheaper outright when the tax on them falls.', sectors: ['Auto'] },
+      ],
+      negatives: [
+        { text: 'Lower tax revenue can widen the fiscal deficit and push bond yields up.', sectors: ['Banking', 'Financials'] },
+        { text: 'Companies may not pass the full cut on to buyers, limiting the volume gain.', sectors: [] },
+      ],
+    },
+    up: {
+      mechanism: 'A higher tax on consumption or income takes spending power out of households.',
+      positives: [
+        { text: 'Higher tax revenue narrows the fiscal deficit, easing pressure on bond yields.', sectors: ['Banking', 'Financials'] },
+      ],
+      negatives: [
+        { text: 'Higher GST or income tax squeezes household budgets, and discretionary purchases are cut first.', sectors: ['FMCG', 'Consumer', 'Retail'] },
+        { text: 'Vehicles become more expensive outright when the tax on them rises.', sectors: ['Auto'] },
+      ],
+    },
+  },
+
+  trade: {
+    up: {
+      mechanism: 'Higher barriers abroad make Indian exports less competitive in that market and raise the risk premium on Indian assets.',
+      positives: [
+        { text: 'A weaker rupee in response cushions exporters’ rupee realisations.', sectors: ['IT'] },
+      ],
+      negatives: [
+        { text: 'Exporters to the tariffing market lose price competitiveness, so orders and margins fall.', sectors: ['Pharma', 'Auto', 'Metals', 'Chemicals'] },
+        { text: 'Supply shut out of one market is dumped in others, depressing global prices for metals and chemicals.', sectors: ['Metals', 'Chemicals'] },
+        { text: 'Trade friction and visa restrictions weigh on US clients’ outsourcing decisions and raise onsite costs.', sectors: ['IT'] },
+        { text: 'Trade conflict raises risk premia and can trigger foreign portfolio outflows.', sectors: [] },
+      ],
+    },
+    down: {
+      mechanism: 'Lower barriers reopen export markets and lower the risk premium on Indian assets.',
+      positives: [
+        { text: 'Lower tariffs or a trade deal restore exporters’ price competitiveness and reopen orders.', sectors: ['Pharma', 'Auto', 'Metals', 'Chemicals', 'IT'] },
+        { text: 'Easing trade tension lowers risk premia and supports foreign inflows.', sectors: [] },
+      ],
+      negatives: [
+        { text: 'Cheaper imports under a trade deal compete with domestic producers.', sectors: ['Metals', 'Chemicals'] },
+      ],
+    },
+  },
+
+  regulatory: {
+    up: {
+      mechanism:
+        'Regulatory action raises compliance cost and caps a practice or a revenue line, and the overhang usually persists until the order’s scope is known.',
+      positives: [
+        { text: 'Incumbents with established compliance functions absorb the cost more easily than smaller competitors, consolidating share.', sectors: ['Banking', 'Financials', 'Pharma'] },
+        { text: 'Clearer rules remove an uncertainty that was already being discounted.', sectors: [] },
+      ],
+      negatives: [
+        { text: 'The action restricts this company’s business directly, and the overhang lasts until its scope and duration are known.', sectors: ['@named'] },
+        { text: 'Remediation, penalties and compliance costs fall on this company first.', sectors: ['@named'] },
+        { text: 'Compliance and remediation costs rise immediately and permanently.', sectors: ['Banking', 'Financials', 'Pharma', 'Telecom', 'Aviation', 'FMCG'] },
+        { text: 'A capped fee, tariff or practice removes a revenue line outright.', sectors: ['Banking', 'Financials', 'Telecom'] },
+        { text: 'The overhang suppresses the valuation multiple until the scope of the action is known.', sectors: [] },
+      ],
+    },
+    down: {
+      mechanism: 'Regulatory relief reopens a restricted business line or lowers compliance cost.',
+      positives: [
+        { text: 'The relief reopens the restricted business line for this company directly.', sectors: ['@named'] },
+        { text: 'Lifting the restriction or easing the rule restores a revenue line and lowers compliance cost.', sectors: ['Banking', 'Financials', 'Pharma', 'Telecom', 'Aviation', 'FMCG'] },
+        { text: 'An overhang the market was discounting is removed.', sectors: [] },
+      ],
+      negatives: [
+        { text: 'Easier rules can invite new competition into the business.', sectors: [] },
+      ],
+    },
+  },
+
+  ratings: {
+    up: {
+      mechanism: 'A rating upgrade lowers the cost of refinancing and widens the pool of lenders.',
+      positives: [
+        { text: 'The upgrade lowers this company’s borrowing costs and widens its pool of lenders.', sectors: ['@named'] },
+        { text: 'Lower sovereign risk premia cut borrowing costs for lenders and leveraged utilities.', sectors: ['Banking', 'Financials', 'Utilities'] },
+      ],
+      negatives: [{ text: 'An upgrade the market expected is often already in the price.', sectors: [] }],
+    },
+    down: {
+      mechanism: 'A rating downgrade raises the cost of refinancing and narrows the pool of lenders.',
+      positives: [{ text: 'A downgrade the market expected is often already in the price.', sectors: [] }],
+      negatives: [
+        { text: 'The downgrade raises this company’s borrowing costs, and some lenders can no longer hold its paper.', sectors: ['@named'] },
+        { text: 'Higher sovereign risk premia raise borrowing costs for lenders and leveraged utilities.', sectors: ['Banking', 'Financials', 'Utilities'] },
+      ],
+    },
+  },
+
+  geopolitical: {
+    up: {
+      mechanism:
+        'Conflict and sanctions raise energy, freight and insurance costs and lengthen supply routes.',
+      positives: [
+        { text: 'Defence order books expand as governments raise security spending.', sectors: ['Defence'] },
+        { text: 'Energy producers realise higher prices on the risk premium.', sectors: ['Energy'] },
+      ],
+      negatives: [
+        { text: 'Fuel, freight and insurance costs rise across every physical supply chain.', sectors: ['Aviation', 'Ports', 'Retail', 'Auto'] },
+        { text: 'Airspace closures and diversions add flying time and fuel to every affected route.', sectors: ['Aviation'] },
+        { text: 'Longer shipping routes stretch working capital and delivery times.', sectors: ['Chemicals', 'Metals', 'Ports'] },
+        { text: 'Risk premia rise market-wide, compressing valuations regardless of company fundamentals.', sectors: [] },
+      ],
+    },
+    down: {
+      mechanism: 'De-escalation unwinds the energy, freight and insurance risk premium and normalises trade routes.',
+      positives: [
+        { text: 'Fuel, freight and insurance costs ease and routes normalise.', sectors: ['Aviation', 'Ports', 'Chemicals', 'Auto', 'Retail'] },
+        { text: 'Lower risk premia bring foreign investors back to Indian equities.', sectors: [] },
+      ],
+      negatives: [
+        { text: 'Energy prices give back the war risk premium.', sectors: ['Energy'] },
+        { text: 'Defence names lose the urgency premium on new orders.', sectors: ['Defence'] },
+      ],
+    },
+  },
+
+  pandemic: {
+    up: {
+      mechanism: 'Movement restrictions shut travel, stores and plants while fixed costs continue.',
+      positives: [
+        { text: 'Demand for medicines, diagnostics and hospital care rises.', sectors: ['Pharma'] },
+        { text: 'Remote work and digitisation accelerate technology spending.', sectors: ['IT'] },
+        { text: 'Households stock up on staples.', sectors: ['FMCG'] },
+      ],
+      negatives: [
+        { text: 'Flights are grounded or restricted, so revenue collapses while aircraft and staff costs remain.', sectors: ['Aviation'] },
+        { text: 'Store footfall and discretionary spending fall under movement restrictions.', sectors: ['Retail', 'Consumer'] },
+        { text: 'Plants and dealerships shut and big-ticket purchases are deferred.', sectors: ['Auto'] },
+        { text: 'Borrowers’ cash flows are disrupted, raising repayment stress and credit costs.', sectors: ['Banking', 'Financials'] },
+        { text: 'Economic activity contracts broadly while restrictions last.', sectors: [] },
+      ],
+    },
+    down: {
+      mechanism: 'Lifting restrictions brings back travel, footfall and big-ticket purchases.',
+      positives: [
+        { text: 'Travel demand returns quickly once restrictions lift.', sectors: ['Aviation'] },
+        { text: 'Store footfall and discretionary spending recover.', sectors: ['Retail', 'Consumer'] },
+        { text: 'Plants reopen and deferred vehicle purchases come back.', sectors: ['Auto'] },
+        { text: 'Economic activity normalises broadly.', sectors: [] },
+      ],
+      negatives: [
+        { text: 'Pandemic-related demand for medicines and diagnostics fades.', sectors: ['Pharma'] },
+        { text: 'Emergency digitisation spending normalises.', sectors: ['IT'] },
+      ],
+    },
+  },
+
+  employment: {
+    up: {
+      mechanism: 'More jobs add household income, which reaches consumption and retail credit.',
+      positives: [
+        { text: 'Rising household income supports discretionary spending.', sectors: ['Consumer', 'Retail'] },
+        { text: 'Retail loan demand and repayment quality both improve.', sectors: ['Banking', 'Financials'] },
+      ],
+      negatives: [{ text: 'Tight labour markets raise wage costs.', sectors: ['IT'] }],
+    },
+    down: {
+      mechanism: 'Fewer jobs reduce household income, reaching consumption first and retail credit after.',
+      positives: [{ text: 'Softer wage pressure eases staff costs.', sectors: ['IT'] }],
+      negatives: [
+        { text: 'Falling household income cuts discretionary spending first.', sectors: ['Consumer', 'Retail'] },
+        { text: 'Retail loan stress rises as borrowers lose income.', sectors: ['Banking', 'Financials'] },
+      ],
+    },
+  },
+
+  market_move: {
+    up: {
+      mechanism: 'A broad rally is carried by the heaviest index constituents, which attract the first foreign and passive buying.',
+      positives: [
+        { text: 'Banks and financials are about a third of the NIFTY 50, so they carry most of a broad rally and draw the first foreign flows.', sectors: ['Banking', 'Financials'] },
+        { text: 'Exchanges, brokers and asset managers earn more as trading volumes and inflows rise.', sectors: ['Financials'] },
+        { text: 'Index heavyweights see passive and foreign buying along with the index.', sectors: ['IT', 'Energy'] },
+      ],
+      negatives: [
+        { text: 'Defensive businesses lag when risk appetite returns, as money rotates into cyclicals.', sectors: ['FMCG', 'Pharma', 'Utilities'] },
+        { text: 'A rally driven by flows rather than earnings stretches valuations, raising the risk of a pullback.', sectors: [] },
+      ],
+    },
+    down: {
+      mechanism: 'A broad sell-off is carried by the heaviest index constituents, which take the bulk of foreign and passive selling.',
+      positives: [
+        { text: 'Defensive businesses tend to fall less and attract money rotating out of cyclicals.', sectors: ['FMCG', 'Pharma', 'Utilities'] },
+      ],
+      negatives: [
+        { text: 'Banks and financials carry most of a broad sell-off and see the heaviest foreign selling.', sectors: ['Banking', 'Financials'] },
+        { text: 'Index heavyweights fall with passive and foreign outflows.', sectors: ['IT', 'Energy'] },
+        { text: 'Exchanges, brokers and asset managers lose fee income as volumes and inflows fall.', sectors: ['Financials'] },
+        { text: 'A broad sell-off drags almost every stock down; defensive names fall less, but they still fall.', sectors: [] },
+      ],
+    },
+  },
+
+  // ── Company channels: '@named' points reach only the companies the
+  // text is about; peers in the same sector are not credited with them. ──
+  earnings: {
+    up: {
+      mechanism: 'Results ahead of expectations reset the forward estimates the market capitalises.',
+      positives: [
+        { text: 'Profit or revenue ahead of expectations pushes forward earnings estimates up, which is what re-rates a stock.', sectors: ['@named'] },
+        { text: 'A beat driven by margins rather than one-offs tends to carry into the following quarters.', sectors: ['@named'] },
+      ],
+      negatives: [
+        { text: 'If the beat was already expected, the stock can still be sold on the news.', sectors: [] },
       ],
     },
     down: {
       mechanism: 'A miss or cut guidance lowers the forward estimates the market capitalises.',
       positives: [
         { text: 'A miss driven by one-off costs can leave underlying earnings power intact.', sectors: [] },
-        { text: 'A sharp de-rating on a temporary issue is where mispricing usually appears.', sectors: [] },
       ],
       negatives: [
-        { text: 'Forward estimates are cut, and the de-rating compounds the earnings decline.', sectors: [] },
-        { text: 'Lowered guidance damages management credibility beyond the quarter itself.', sectors: [] },
+        { text: 'Forward earnings estimates are cut, and the de-rating compounds the decline in profit.', sectors: ['@named'] },
+        { text: 'Weaker results or guidance dent management credibility beyond the quarter itself.', sectors: ['@named'] },
+      ],
+    },
+    neutral: {
+      mechanism: 'The results are named but not how they compared with expectations.',
+      positives: [{ text: 'A result in line with expectations removes uncertainty.', sectors: ['@named'] }],
+      negatives: [{ text: 'Until the numbers are out, estimates and the stock can move either way.', sectors: ['@named'] }],
+    },
+  },
+
+  capital_return: {
+    up: {
+      mechanism: 'Returning capital signals confidence in cash generation without changing the business’s earnings power.',
+      positives: [
+        { text: 'Returning cash signals management’s confidence in future cash generation.', sectors: ['@named'] },
+        { text: 'Shareholders receive cash or extra shares directly, and a buyback lifts earnings per share for those who stay.', sectors: ['@named'] },
+      ],
+      negatives: [
+        { text: 'The distribution moves value to shareholders rather than creating it; the earnings power of the business is unchanged.', sectors: [] },
+      ],
+    },
+    down: {
+      mechanism: 'Cancelling or deferring a payout signals caution about cash.',
+      positives: [{ text: 'Retained cash stays available for the business.', sectors: [] }],
+      negatives: [
+        { text: 'Cancelling or deferring a payout signals that management wants to conserve cash.', sectors: ['@named'] },
+        { text: 'Income-focused shareholders sell when an expected payout is withdrawn.', sectors: ['@named'] },
+      ],
+    },
+  },
+
+  ma: {
+    neutral: {
+      mechanism: 'A deal changes the acquirer’s earnings mix and leverage and re-prices the target towards the deal value.',
+      positives: [
+        { text: 'The deal adds revenue, capacity or market access that would take years to build.', sectors: ['@named'] },
+      ],
+      negatives: [
+        { text: 'Paying a premium and funding it with debt or new shares weighs on returns until the synergies arrive.', sectors: ['@named'] },
+        { text: 'Integration risk is real: many acquisitions take longer to pay off than planned.', sectors: [] },
+      ],
+    },
+  },
+
+  management: {
+    up: {
+      mechanism: 'A leadership appointment matters through the strategy it signals.',
+      positives: [
+        { text: 'A credible new leader can bring a clearer strategy and renewed execution focus.', sectors: ['@named'] },
+      ],
+      negatives: [
+        { text: 'Strategy changes take quarters to show in earnings, and transitions carry execution risk.', sectors: [] },
+      ],
+    },
+    down: {
+      mechanism: 'An unplanned senior departure creates execution and continuity risk.',
+      positives: [
+        { text: 'A well-prepared successor or a respected interim leader can limit the disruption.', sectors: [] },
+      ],
+      negatives: [
+        { text: 'An unplanned departure creates execution and continuity risk until a successor and their mandate are known.', sectors: ['@named'] },
+        { text: 'Investors discount the existing strategy while its owner is leaving.', sectors: ['@named'] },
+      ],
+    },
+  },
+
+  company_news: {
+    up: {
+      mechanism: 'Company-specific good news feeds that company’s forward estimates directly.',
+      positives: [
+        { text: 'New business, pricing power or a favourable development raises this company’s earnings outlook directly.', sectors: ['@named'] },
+        { text: 'Positive news flow tends to draw buying interest until the next result tests it.', sectors: ['@named'] },
+      ],
+      negatives: [
+        { text: 'Part of the good news may already be in the price.', sectors: [] },
+      ],
+    },
+    down: {
+      mechanism: 'Company-specific bad news hits that company through its earnings outlook and the discount investors apply.',
+      positives: [
+        { text: 'If the issue proves contained, the sell-off can overshoot the actual damage.', sectors: [] },
+      ],
+      negatives: [
+        { text: 'The setback hits this company’s earnings outlook or governance standing directly.', sectors: ['@named'] },
+        { text: 'Investors apply a discount until the issue is resolved, so the overhang can outlast the news.', sectors: ['@named'] },
       ],
     },
   },
 }
 
-/** A point applies to an entity if it is broad, or names that entity's sector. */
-function applicable(points: ImpactPoint[], sector: string): ImpactPoint[] {
-  return points.filter((p) => p.sectors.length === 0 || p.sectors.includes(sector))
+/** Tag for points that reach only the companies an event names. */
+const NAMED = '@named'
+
+/**
+ * A point applies to an entity if it is broad, or names that entity's
+ * sector; '@named' points apply only to entities the event is about.
+ */
+function applicable(points: ImpactPoint[], sector: string, companyScope: boolean, symbol?: string): ImpactPoint[] {
+  // For news about a particular company, the sector-wide points describe a
+  // different event (a rule for every lender, not an order against one).
+  // '=SYMBOL' points are about one company's business within its sector — a
+  // jeweller on a gold move, not every consumer-durables maker.
+  return points.filter((p) =>
+    p.sectors.length === 0
+      ? true
+      : companyScope
+        ? p.sectors.includes(NAMED)
+        : p.sectors.includes(sector) || (symbol !== undefined && p.sectors.includes(`=${symbol}`))
+  )
 }
 
 /** Broad points weigh half a sector-specific one; see EntityImpact.balance. */
@@ -420,58 +762,83 @@ export interface ImpactAnalysis {
 }
 
 export function analyseImpact(request: ImpactRequest): ImpactAnalysis {
-  const text = `${request.title} ${request.description || ''}`
-  const classification = classifyEventByRules(text)
-
-  // classifyEventByRules reports the channel through event_type; map back to
-  // the impact table, whose keys are the channel ids.
-  const themeId = THEME_BY_EVENT_TYPE[classification.event_type]
+  const text = `${request.title} ${request.description || ''}`.trim()
+  const read = assessEvent(text)
+  const classification = read.classification
 
   // The impact table is keyed by which way the underlying VARIABLE moved, not
   // by the market's reaction to it. Those are frequently opposite — crude
-  // rising is a NEGATIVE market direction — so deriving polarity from
-  // classification.direction selected the wrong side of every inverse channel.
-  // Detect the variable's own direction from the text instead.
-  const polarity: Polarity = polarityFor(text)
-
-  const channel = themeId ? CHANNEL_IMPACTS[themeId] : undefined
-  // Some channels are written from the variable's direction and some are
-  // one-sided by nature (regulatory); fall back across the available keys
-  // rather than returning nothing for a recognised event.
-  const sided = channel?.[polarity] ?? channel?.up ?? channel?.down ?? channel?.neutral
+  // rising is a NEGATIVE market direction — so the polarity comes from the
+  // assessment of the text, not from classification.direction.
+  const polarity: Polarity = read.polarity
+  const channelKey =
+    classification.channel === 'policy_rate' && polarity === 'neutral'
+      ? 'policy_rate_neutral'
+      : classification.channel ?? THEME_BY_EVENT_TYPE[classification.event_type]
+  const channel = channelKey ? CHANNEL_IMPACTS[channelKey] : undefined
+  // Only the side the text actually describes. A channel with no side for
+  // "neutral" gets no read at all — never the "up" side by default, which is
+  // how "Crude oil crashed by 25%" came back as a crude spike.
+  const sided = channel?.[polarity] ?? (polarity === 'neutral' ? undefined : channel?.neutral)
 
   const sectors = request.sectors.length > 0 ? request.sectors : classification.affected_sectors
 
+  // Who the event is about. For a company channel only these are touched;
+  // for a macro channel everyone in an affected sector is.
+  const namedSymbols = new Set(read.companies.map((c) => c.symbol))
+  const namedSectors = new Set<string>(
+    read.companies.length > 0 ? read.companies.map((c) => c.sector) : read.mentionedSectors
+  )
+  const companyScope = read.scope === 'company'
+  const targetedCompany = (symbol: string, sector: string) =>
+    namedSymbols.size > 0 ? namedSymbols.has(symbol) : namedSectors.has(sector)
+  const subject = read.companies.map((c) => c.name).slice(0, 3).join(', ')
+
+  const empty = (entity: string, kind: 'sector' | 'company', sector: string, mechanism: string): EntityImpact => ({
+    entity,
+    kind,
+    sector,
+    direction: 'NEUTRAL',
+    confidence: 20,
+    positives: [],
+    negatives: [],
+    balance: 0,
+    mechanism,
+  })
+
   if (!sided) {
-    const empty = (entity: string, kind: 'sector' | 'company', sector: string): EntityImpact => ({
-      entity,
-      kind,
-      sector,
-      direction: 'NEUTRAL',
-      confidence: 20,
-      positives: [],
-      negatives: [],
-      balance: 0,
-      mechanism:
-        'No standard transmission channel was recognised in this headline, so no directional read is offered for this entity.',
-    })
+    const why = !channel
+      ? 'No standard transmission channel was recognised in this headline, so no directional read is offered for this entity.'
+      : `The headline points to the ${read.label} channel but does not say which way it moved, so no direction is assigned.`
     return {
       headline: request.title,
       eventType: classification.event_type,
       economicVariable: classification.economic_variable,
       overallDirection: 'NEUTRAL',
       magnitude: classification.magnitude,
-      mechanism:
-        'This headline did not match a known macro or corporate transmission channel, so the engine offers no impact read rather than inventing one.',
-      sectorImpacts: sectors.map((s) => empty(s, 'sector', s)),
-      companyImpacts: (request.companies || []).map((c) => empty(c.name || c.symbol, 'company', c.sector)),
-      unrecognised: true,
+      mechanism: !channel
+        ? 'This headline did not match a known macro or corporate transmission channel, so the engine offers no impact read rather than inventing one.'
+        : `The headline points to the ${read.label} channel without saying which way it moved, so the engine offers no direction rather than guessing one.`,
+      sectorImpacts: sectors.map((s) => empty(s, 'sector', s, why)),
+      companyImpacts: (request.companies || []).map((c) => empty(c.name || c.symbol, 'company', c.sector, why)),
+      unrecognised: !channel,
     }
   }
 
-  const build = (entity: string, kind: 'sector' | 'company', sector: string): EntityImpact => {
-    const up = applicable(sided.positives, sector)
-    const down = applicable(sided.negatives, sector)
+  const build = (entity: string, kind: 'sector' | 'company', sector: string, symbol?: string): EntityImpact => {
+    const targeted = kind === 'company' && symbol ? targetedCompany(symbol, sector) : namedSectors.has(sector)
+    if (companyScope && !targeted) {
+      return empty(
+        entity,
+        kind,
+        sector,
+        subject
+          ? `This is news about ${subject}; ${entity} is not directly affected by it.`
+          : `This is company news; ${entity} is not directly affected by it.`
+      )
+    }
+    const up = applicable(sided.positives, sector, companyScope, symbol)
+    const down = applicable(sided.negatives, sector, companyScope, symbol)
     const positives = up.map((p) => p.text)
     const negatives = down.map((p) => p.text)
     const direction = resolveDirection(up, down)
@@ -504,15 +871,15 @@ export function analyseImpact(request: ImpactRequest): ImpactAnalysis {
     magnitude: classification.magnitude,
     mechanism: sided.mechanism,
     sectorImpacts: sectors.map((s) => build(s, 'sector', s)),
-    companyImpacts: (request.companies || []).map((c) => build(c.name || c.symbol, 'company', c.sector)),
+    companyImpacts: (request.companies || []).map((c) => build(c.name || c.symbol, 'company', c.sector, c.symbol)),
     unrecognised: false,
   }
 }
 
 /**
- * The classifier reports an event_type; the impact table is keyed by channel.
- * Kept as an explicit map so an unmapped event type degrades to "no read"
- * rather than silently matching the wrong channel.
+ * For classifications that carry no channel id (the language-model path),
+ * the event type picks the impact table. An unmapped type degrades to "no
+ * read" rather than silently matching the wrong channel.
  */
 const THEME_BY_EVENT_TYPE: Record<string, string> = {
   MONETARY_POLICY: 'policy_rate',
@@ -526,6 +893,15 @@ const THEME_BY_EVENT_TYPE: Record<string, string> = {
   GEOPOLITICAL: 'geopolitical',
   EARNINGS: 'earnings',
   AGRICULTURE: 'monsoon',
+  EMPLOYMENT: 'employment',
+  CREDIT_RATING: 'ratings',
+  'M&A': 'ma',
+  DIVIDEND: 'capital_return',
+  MANAGEMENT_CHANGE: 'management',
+  TRADE_POLICY: 'trade',
+  PANDEMIC: 'pandemic',
+  MARKET_MOVE: 'market_move',
+  CORPORATE_NEWS: 'company_news',
 }
 
 /**
