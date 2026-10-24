@@ -25,6 +25,7 @@ const report = ['report.txt', 'ui.txt']
   .map((f) => readFileSync(`${dir}/${f}`, 'utf8'))
   .join('\n\n')
 await post('smoke-report', 'Production smoke report', report || 'no report written')
+if (existsSync(`${dir}/audit.txt`)) await post('smoke-audit', 'Production audit', readFileSync(`${dir}/audit.txt`, 'utf8'))
 for (const f of readdirSync(dir).filter((f) => f.startsWith('thumb-') && f.endsWith('.b64'))) {
   const name = f.slice('thumb-'.length, -'.b64'.length)
   await post(`smoke-thumb-${name}`, `Screenshot: ${name}`, readFileSync(`${dir}/${f}`, 'utf8'))
