@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches: [claude/event-driven-stock-ai-tj6oic]
-    paths: [scripts/smoke-audit.mjs, scripts/smoke-production.mjs, scripts/smoke-production-ui.mjs, scripts/smoke-post-checks.mjs, .github/workflows/smoke-production.yml]
+    paths: [scripts/smoke-news.mjs, scripts/smoke-audit.mjs, scripts/smoke-production.mjs, scripts/smoke-production-ui.mjs, scripts/smoke-post-checks.mjs, .github/workflows/smoke-production.yml]
 permissions:
   contents: read
   checks: write
@@ -18,6 +18,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Collect real headlines
+        continue-on-error: true
+        run: node scripts/smoke-news.mjs
       - name: Install browser driver
         run: mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i playwright-core@1.48.2 sharp@0.33.5 >/dev/null
       - name: Audit (analysis answers and page timing)
