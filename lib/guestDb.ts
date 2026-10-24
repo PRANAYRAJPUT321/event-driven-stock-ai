@@ -80,7 +80,12 @@ function complete(table: string, row: Row, tables: Tables): Row {
   if (table === 'portfolio_positions') out.entry_date ??= now
   if (table === 'watchlists' && !out.stocks) {
     const stock = stockRows(tables).find((s) => s.id === out.stock_id || s.symbol === out.stock_id)
-    out.stocks = stock ? { symbol: stock.symbol, name: stock.name, sector: stock.sector ?? null } : null
+    // A company outside the NIFTY 50, watched from an analysis, is named by
+    // the score row it was watched from.
+    const scored = (tables.stock_scores || []).find((s) => s.stock_symbol === out.stock_id && s.stock_name)
+    out.stocks = stock
+      ? { symbol: stock.symbol, name: stock.name, sector: stock.sector ?? null }
+      : { symbol: out.stock_id, name: scored?.stock_name ?? out.stock_id, sector: scored?.stock_sector ?? null }
   }
   return out
 }
@@ -288,6 +293,9 @@ function scoreRows(id: string, result: any): Row[] {
     event_analysis_id: id,
     stock_id: s.symbol,
     stock_symbol: s.symbol,
+    // Kept for companies outside the NIFTY 50, which no built-in list names.
+    stock_name: s.name ?? null,
+    stock_sector: s.sector ?? null,
     event_impact_score: s.eventImpactScore ?? null,
     event_impact_direction: s.eventImpactDirection ?? result.classification?.direction ?? null,
     fundamental_score: s.fundamentalScore,

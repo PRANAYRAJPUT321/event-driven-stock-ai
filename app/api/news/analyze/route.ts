@@ -67,7 +67,14 @@ export async function POST(request: NextRequest) {
         .map((c) => ({ symbol: c.symbol, name: c.name, sector: c.sector }))
     }
 
-    const analysis = analyseImpact({ title, description, sectors, companies })
+    // Companies the caller names for company news that names no index
+    // company (Union Bank of India's results, scored on Union Bank) are the
+    // ones the news is about.
+    const named =
+      read.scope === 'company' && read.companies.length === 0 && Array.isArray(body?.companies) && companies.length > 0
+        ? companies.map((c) => ({ symbol: c.symbol, name: c.name || c.symbol, sector: c.sector }))
+        : undefined
+    const analysis = analyseImpact({ title, description, sectors, companies, ...(named ? { named } : {}) })
 
     return NextResponse.json(
       { analysis, analysedAt: new Date().toISOString() },

@@ -24,12 +24,15 @@ interface StockScore {
   id: string
   stock_id: string
   stock_symbol: string
+  /** Saved with the score for companies outside the NIFTY 50. */
+  stock_name?: string | null
+  stock_sector?: string | null
   opportunity_score: number
   recommendation: string
   confidence: number
-  fundamental_score: number
-  valuation_score: number
-  technical_score: number
+  fundamental_score: number | null
+  valuation_score: number | null
+  technical_score: number | null
   risk_score: number
   risk_level: string
   event_impact_score?: number | null
@@ -476,7 +479,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
             sectors={analysis.affected_sectors || []}
             stockSymbol={topStock?.stock_symbol}
             stockImpactScore={topStock?.event_impact_score ?? null}
-            stockSector={topStock ? findEquity(topStock.stock_symbol)?.sector : undefined}
+            stockSector={topStock ? findEquity(topStock.stock_symbol)?.sector ?? topStock.stock_sector ?? undefined : undefined}
             explanation={classification.transmission_explanation}
           />
         </div>
@@ -488,7 +491,8 @@ export default function EventDetails({ params }: { params: { id: string } }) {
         sectors={analysis.affected_sectors || []}
         companies={stocks.slice(0, 6).map((stock) => ({
           symbol: stock.stock_symbol,
-          name: findEquity(stock.stock_symbol)?.name,
+          name: findEquity(stock.stock_symbol)?.name ?? stock.stock_name ?? undefined,
+          sector: findEquity(stock.stock_symbol)?.sector ?? stock.stock_sector ?? undefined,
         }))}
       />
 
@@ -536,7 +540,7 @@ export default function EventDetails({ params }: { params: { id: string } }) {
         // Corporation" rather than the bare ticker.
         companies={stocks.slice(0, 3).map((stock) => ({
           symbol: stock.stock_symbol,
-          name: findEquity(stock.stock_symbol)?.name,
+          name: findEquity(stock.stock_symbol)?.name ?? stock.stock_name ?? undefined,
         }))}
       />
 
@@ -696,9 +700,10 @@ export default function EventDetails({ params }: { params: { id: string } }) {
                         <span className="text-ink-faint">—</span>
                       )}
                     </td>
-                    <td className="py-4 px-2 text-center text-ink-muted font-mono">{(stock.fundamental_score || 0).toFixed(0)}</td>
-                    <td className="py-4 px-2 text-center text-ink-muted font-mono">{(stock.valuation_score || 0).toFixed(0)}</td>
-                    <td className="py-4 px-2 text-center text-ink-muted font-mono">{(stock.technical_score || 0).toFixed(0)}</td>
+                    {/* A factor with no sourced data is "—", never a 0 that reads as a terrible score. */}
+                    <td className="py-4 px-2 text-center text-ink-muted font-mono">{factorText(stock.fundamental_score)}</td>
+                    <td className="py-4 px-2 text-center text-ink-muted font-mono">{factorText(stock.valuation_score)}</td>
+                    <td className="py-4 px-2 text-center text-ink-muted font-mono">{factorText(stock.technical_score)}</td>
                     <td className="py-4 px-2 text-center">
                       <span
                         className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
@@ -760,4 +765,8 @@ export default function EventDetails({ params }: { params: { id: string } }) {
       </div>
     </AppShell>
   )
+}
+
+function factorText(score: number | null | undefined): string {
+  return typeof score === 'number' && Number.isFinite(score) ? score.toFixed(0) : '—'
 }
