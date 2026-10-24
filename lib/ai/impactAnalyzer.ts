@@ -181,11 +181,11 @@ const CHANNEL_IMPACTS: Record<string, Partial<Record<Polarity, SidedImpact>>> = 
         'Cooling inflation restores household purchasing power and relieves input-cost pressure.',
       positives: [
         { text: 'Gross margins recover as input costs stabilise while selling prices hold.', sectors: ['FMCG', 'Consumer', 'Retail'] },
-        { text: 'Real household income improves, supporting volumes.', sectors: ['Retail', 'Consumer', 'Auto'] },
+        { text: 'Real household income improves, supporting volumes.', sectors: ['Retail', 'Consumer', 'Auto', 'FMCG'] },
         { text: 'Room for easier policy opens up, which helps lenders and rate-sensitive demand.', sectors: ['Banking', 'Financials', 'Realty'] },
       ],
       negatives: [
-        { text: 'Companies lose the cover that broad inflation gave them to raise prices.', sectors: ['FMCG', 'Consumer'] },
+        { text: 'Companies lose the cover that broad inflation gave them to raise prices.', sectors: [] },
         { text: 'Producers of the cooling commodities realise lower prices.', sectors: ['Metals', 'Energy'] },
         { text: 'Disinflation driven by weak demand rather than easing supply is a warning, not a relief.', sectors: [] },
       ],
@@ -266,7 +266,7 @@ const CHANNEL_IMPACTS: Record<string, Partial<Record<Polarity, SidedImpact>>> = 
     down: {
       mechanism: 'Slower growth weakens credit demand, order books and cyclical volumes together.',
       positives: [
-        { text: 'Defensive demand holds up better and can outperform on a relative basis.', sectors: ['FMCG', 'Pharma', 'Utilities'] },
+        { text: 'Defensive demand holds up better and can outperform on a relative basis.', sectors: ['FMCG', 'Pharma', 'Healthcare', 'Utilities'] },
         { text: 'A slowdown raises the likelihood of supportive policy easing.', sectors: [] },
       ],
       negatives: [
@@ -378,6 +378,50 @@ const CHANNEL_IMPACTS: Record<string, Partial<Record<Polarity, SidedImpact>>> = 
       ],
       negatives: [
         { text: 'Jewellers’ gold inventories are revalued lower, trimming reported margins in the quarter.', sectors: ['=TITAN'] },
+      ],
+    },
+  },
+
+  energy_tax: {
+    up: {
+      mechanism: 'A windfall tax takes a share of crude producers’ realisations above a threshold price.',
+      positives: [{ text: 'Higher government revenue narrows the fiscal deficit.', sectors: [] }],
+      negatives: [
+        { text: 'Producers keep less of every barrel’s price, so earnings fall directly with the levy.', sectors: ['Energy'] },
+        { text: 'An unpredictable levy raises the risk premium investors demand on energy producers.', sectors: ['Energy'] },
+      ],
+    },
+    down: {
+      mechanism: 'Removing a windfall tax lets crude producers keep the full price of every barrel.',
+      positives: [
+        { text: 'Producers keep more of every barrel’s price, lifting earnings directly.', sectors: ['Energy'] },
+        { text: 'Removing an unpredictable levy lowers the risk premium on energy producers.', sectors: ['Energy'] },
+      ],
+      negatives: [{ text: 'Lower tax revenue can widen the fiscal deficit.', sectors: [] }],
+    },
+  },
+
+  fuel_price: {
+    up: {
+      mechanism: 'Higher pump prices raise running and freight costs and take spending power from households.',
+      positives: [
+        { text: 'Fuel retailers earn a wider marketing margin on every litre sold.', sectors: ['=RELIANCE'] },
+      ],
+      negatives: [
+        { text: 'Higher running costs deter vehicle purchases, especially two-wheelers and entry cars.', sectors: ['Auto'] },
+        { text: 'Freight costs rise across distribution, squeezing consumer companies’ margins.', sectors: ['FMCG', 'Consumer', 'Retail'] },
+        { text: 'Higher fuel prices lift headline inflation.', sectors: [] },
+      ],
+    },
+    down: {
+      mechanism: 'Lower pump prices cut running and freight costs and leave households more to spend.',
+      positives: [
+        { text: 'Lower running costs support vehicle demand, especially two-wheelers and entry cars.', sectors: ['Auto'] },
+        { text: 'Cheaper freight eases distribution costs and leaves households more to spend.', sectors: ['FMCG', 'Consumer', 'Retail'] },
+        { text: 'Lower fuel prices cool headline inflation.', sectors: [] },
+      ],
+      negatives: [
+        { text: 'Fuel retailers give up part of their marketing margin on every litre sold.', sectors: ['=RELIANCE'] },
       ],
     },
   },
@@ -511,7 +555,7 @@ const CHANNEL_IMPACTS: Record<string, Partial<Record<Polarity, SidedImpact>>> = 
     up: {
       mechanism: 'Movement restrictions shut travel, stores and plants while fixed costs continue.',
       positives: [
-        { text: 'Demand for medicines, diagnostics and hospital care rises.', sectors: ['Pharma'] },
+        { text: 'Demand for medicines, diagnostics and hospital care rises.', sectors: ['Pharma', 'Healthcare'] },
         { text: 'Remote work and digitisation accelerate technology spending.', sectors: ['IT'] },
         { text: 'Households stock up on staples.', sectors: ['FMCG'] },
       ],
@@ -532,7 +576,7 @@ const CHANNEL_IMPACTS: Record<string, Partial<Record<Polarity, SidedImpact>>> = 
         { text: 'Economic activity normalises broadly.', sectors: [] },
       ],
       negatives: [
-        { text: 'Pandemic-related demand for medicines and diagnostics fades.', sectors: ['Pharma'] },
+        { text: 'Pandemic-related demand for medicines and diagnostics fades.', sectors: ['Pharma', 'Healthcare'] },
         { text: 'Emergency digitisation spending normalises.', sectors: ['IT'] },
       ],
     },
@@ -566,14 +610,14 @@ const CHANNEL_IMPACTS: Record<string, Partial<Record<Polarity, SidedImpact>>> = 
         { text: 'Index heavyweights see passive and foreign buying along with the index.', sectors: ['IT', 'Energy'] },
       ],
       negatives: [
-        { text: 'Defensive businesses lag when risk appetite returns, as money rotates into cyclicals.', sectors: ['FMCG', 'Pharma', 'Utilities'] },
+        { text: 'Defensive businesses lag when risk appetite returns, as money rotates into cyclicals.', sectors: ['FMCG', 'Pharma', 'Healthcare', 'Utilities'] },
         { text: 'A rally driven by flows rather than earnings stretches valuations, raising the risk of a pullback.', sectors: [] },
       ],
     },
     down: {
       mechanism: 'A broad sell-off is carried by the heaviest index constituents, which take the bulk of foreign and passive selling.',
       positives: [
-        { text: 'Defensive businesses tend to fall less and attract money rotating out of cyclicals.', sectors: ['FMCG', 'Pharma', 'Utilities'] },
+        { text: 'Defensive businesses tend to fall less and attract money rotating out of cyclicals.', sectors: ['FMCG', 'Pharma', 'Healthcare', 'Utilities'] },
       ],
       negatives: [
         { text: 'Banks and financials carry most of a broad sell-off and see the heaviest foreign selling.', sectors: ['Banking', 'Financials'] },
@@ -745,6 +789,12 @@ export interface ImpactRequest {
   description?: string
   sectors: string[]
   companies?: { symbol: string; name?: string; sector: string }[]
+  /**
+   * The companies the event is about, when the caller knows better than the
+   * text matcher — a listed company outside the NIFTY 50 found by name in the
+   * NSE directory.
+   */
+  named?: { symbol: string; name: string; sector: string }[]
 }
 
 export interface ImpactAnalysis {
@@ -785,14 +835,17 @@ export function analyseImpact(request: ImpactRequest): ImpactAnalysis {
 
   // Who the event is about. For a company channel only these are touched;
   // for a macro channel everyone in an affected sector is.
-  const namedSymbols = new Set(read.companies.map((c) => c.symbol))
+  const namedCompanies = request.named && request.named.length > 0 ? request.named : read.companies
+  const namedSymbols = new Set(namedCompanies.map((c) => c.symbol))
   const namedSectors = new Set<string>(
-    read.companies.length > 0 ? read.companies.map((c) => c.sector) : read.mentionedSectors
+    namedCompanies.length > 0 ? namedCompanies.map((c) => c.sector) : read.mentionedSectors
   )
-  const companyScope = read.scope === 'company'
+  // Companies supplied by the caller (found by name in the NSE directory)
+  // make a company or regulatory channel about them.
+  const companyScope = read.scope === 'company' || (namedCompanies !== read.companies && read.themeScope === 'mixed')
   const targetedCompany = (symbol: string, sector: string) =>
     namedSymbols.size > 0 ? namedSymbols.has(symbol) : namedSectors.has(sector)
-  const subject = read.companies.map((c) => c.name).slice(0, 3).join(', ')
+  const subject = namedCompanies.map((c) => c.name).slice(0, 3).join(', ')
 
   const empty = (entity: string, kind: 'sector' | 'company', sector: string, mechanism: string): EntityImpact => ({
     entity,

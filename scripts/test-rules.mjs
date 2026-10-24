@@ -804,7 +804,9 @@ section('negation and holds')
 for (const text of ['RBI does not cut rates', 'RBI unlikely to cut rates this year', 'RBI keeps repo rate unchanged']) {
   const c = classifyEventByRules(text)
   check(`"${text}" is a hold`, [c.event_type, c.direction], ['MONETARY_POLICY', 'NEUTRAL'])
+  check(`"${text}" is analysed, not refused`, assessEvent(text).verdict, 'ok')
 }
+check('a policy headline with no decision is refused', assessEvent('RBI’s Samvad 2026 kicks off, focuses on monetary policy').verdict, 'no_direction')
 const hold = analyseImpact({ title: 'RBI keeps repo rate unchanged', sectors: ['Banking'] })
 checkThat('a hold is not read as a hike', !hold.sectorImpacts[0].negatives.some((t) => /treasury losses/i.test(t)),
   JSON.stringify(hold.sectorImpacts[0]))
@@ -882,6 +884,50 @@ for (const [text, verdict] of [
 ]) check(`"${text}"`, assessEvent(text).verdict, verdict)
 check('a company named in a non-event is offered as a way forward',
   assessEvent('I love HDFC Bank').companies.map((c) => c.symbol), ['HDFCBANK'])
+
+
+section('real headlines, as Indian financial sites write them')
+for (const [text, type, direction] of [
+  ['Brent crude hits six-month high as Indian equities extend losses', 'COMMODITY_SHOCK', 'NEGATIVE'],
+  ['Markets rally as RBI announces surprise rate cut', 'MONETARY_POLICY', 'POSITIVE'],
+  ['India VIX spikes 10% as markets turn volatile', 'MARKET_MOVE', 'NEGATIVE'],
+  ['GST council cuts rates on 375 items', 'GOVERNMENT_POLICY', 'POSITIVE'],
+  ['Government hikes windfall tax on crude oil', 'GOVERNMENT_POLICY', 'NEGATIVE'],
+  ['FIIs sell ₹5,000 crore worth of Indian equities in October', 'GLOBAL_MARKET_SHOCK', 'NEGATIVE'],
+  ['Stock Market Today: Sensex, Nifty Extend Losses For 4th Day Amid Selling Pressure, Oil Price Surge', 'MARKET_MOVE', 'NEGATIVE'],
+  ['Green Stocks, Oct 22: Market Falls as Crude Oil Surge and Geopolitical Tensions Weigh on Sentiment', 'GEOPOLITICAL', 'NEGATIVE'],
+  ['Fed holds rates steady, signals two cuts this year', 'GLOBAL_MARKET_SHOCK', 'POSITIVE'],
+  ['Infosys cuts FY27 guidance; Q2 net profit rises 6.2% to ₹7,828 crore', 'EARNINGS', 'NEGATIVE'],
+  ['Eternal Q2 results: Net profit rises 92% to Rs 125 crore, but misses estimates; shares fall 3.5%', 'EARNINGS', 'NEGATIVE'],
+  ['HUL Q2: volume growth flat, margins contract', 'EARNINGS', 'NEGATIVE'],
+  ['Adani Enterprises shares surge 8% after SEBI clean chit', 'CORPORATE_NEWS', 'POSITIVE'],
+]) {
+  const c = classifyEventByRules(text)
+  check(`"${text.slice(0, 70)}"`, [c.event_type, c.direction], [type, direction])
+}
+// Both readings of these — the market or crude — are negative; the
+// direction is what must not flip.
+for (const text of ['Indian equities extend losses as Brent crude hits six-month high', 'Indian markets snap 1-week rally following surge in crude, FII outflows'])
+  check(`"${text.slice(0, 70)}" is negative`, classifyEventByRules(text).direction, 'NEGATIVE')
+check('a sector index move is that sector', classifyEventByRules('Nifty Auto Falls Nearly 8% in a Month').affected_sectors, ['Auto'])
+check('"tensions weigh" does not read as tensions easing',
+  assessEvent('Green Stocks, Oct 22: Market Falls as Crude Oil Surge and Geopolitical Tensions Weigh on Sentiment').polarity, 'up')
+for (const [text, verdict] of [
+  ['Rupee ends flat as stock slump, importer hedging erodes bounce', 'no_direction'],
+  ['Sectoral Indices Slide as Crude Nears $114; Durables, Metals Hit', 'no_direction'],
+  ["US bank stocks' longest losing streak since 2008 clashes with earnings", 'needs_company'],
+  ['China’s pharma stocks gain favours amid progress of innovative drugs', 'needs_company'],
+  ['Top 5 Automobile Stocks In India To Invest In October 2026', 'not_event'],
+  ['Stocks to Watch Today, Oct 23: Jio IPO, Infosys, Swiggy, HPCL in focus', 'not_event'],
+  ['How to Invest in US Stocks from India', 'not_event'],
+  ['List of RBI Governors in India from 1935 to 2026, Tenure', 'no_direction'],
+  ['Gold Rate Today, October 20: Check 18, 22 and 24 carat gold prices in Chennai, Mumbai', 'no_direction'],
+  ['Tamil Nadu Monsoon Alert: Why Chennai Is Facing Heavy Waterlogging', 'no_direction'],
+]) check(`"${text.slice(0, 70)}"`, assessEvent(text).verdict, verdict)
+check('"Input Tax Credit (ITC)" is not the company ITC',
+  assessEvent('Powering Up, Taxed Down: The Industrial Friction Over Input Tax Credit (ITC)').companies.length, 0)
+check('ITC Hotels is its own company', assessEvent('ITC Hotels to Acquire Kumarakom Resort in Kerala').companies.length, 0)
+check('IndiGo is the airline', assessEvent('IndiGo shares fall after Q2 loss widens').companies.map((c) => c.symbol), ['INDIGO'])
 
 section('recommendation bands')
 check('70 is a BUY', scoreToRecommendation(70), 'BUY')

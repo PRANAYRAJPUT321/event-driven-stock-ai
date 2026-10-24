@@ -9,6 +9,7 @@
  */
 import directory from './data/nse-equities.json'
 import { NIFTY_50, RENAMED_SYMBOLS, type EquityConstituent } from './indianEquities'
+import { findCompanies } from './companyMentions'
 
 export interface DirectoryEntry {
   symbol: string
@@ -124,4 +125,96 @@ export function searchDirectory(query: string, limit = 10): SearchHit[] {
     if (out.length >= limit) break
   }
   return out
+}
+
+/** Words that start headlines without being company names. */
+const GENERIC_SUBJECTS = new Set([
+  'india', 'indian', 'sensex', 'nifty', 'markets', 'market', 'stock market', 'stocks', 'shares', 'rupee', 'gold',
+  'silver', 'crude', 'oil', 'rbi', 'sebi', 'government', 'govt', 'centre', 'us', 'china', 'fed', 'fii', 'fiis',
+  'fpi', 'fpis', 'live', 'breaking', 'stocks to watch', 'multibagger stock', 'top gainers', 'top losers',
+  'q1', 'q2', 'q3', 'q4', 'earnings', 'results', 'budget', 'gst', 'ipo', 'bank', 'banks', 'it stocks',
+  'update', 'new', 'top', 'why', 'how', 'what', 'watch', 'stock', 'opinion', 'video', 'explained', 'big', 'good',
+  'great', 'news', 'report', 'analysis', 'exclusive', 'market recap', 'daily', 'weekly', 'green stocks', 'price action',
+])
+
+const SUBJECT_STOP =
+  /\s(?:q[1-4]\w*|fy\d+|h[12]\b|shares?|share price|stocks?|posts?|reports?|reported|net profit|profits?|revenue|results?|earnings|announces?|declares?|bags?|wins?|won|secures?|gets?|receives?|to|says|plans?|launch\w*|signs?|raises?|cuts?|slides?|slumps?|jumps?|falls?|surges?|soars?|rises?|rose|hits?|sees?|board|ipo|orders?|arm|unit|parent|stake|sales|tanks?|plunges?|rallies|rally|gains?|drops?|declines?|crash\w*|surge|up|down|in|on|at|for|after|amid|as|vs)\b|['’]s\b|[,;:(|]/i
+
+function phraseHit(phrase: string, allowPrefix: boolean): DirectoryEntry | null {
+  const key = searchable(phrase)
+  if (!key || GENERIC_SUBJECTS.has(key) || GENERIC_SUBJECTS.has(phrase.toLowerCase().trim())) return null
+  const bySymbol = BY_SYMBOL.get(phrase.toUpperCase().replace(/\s+/g, ''))
+  if (bySymbol && phrase.trim().length >= 3 && phrase === phrase.toUpperCase()) return bySymbol
+  let best: DirectoryEntry | null = null
+  // A prefix of a longer name is accepted only for specific phrases: "Union
+  // Bank" for Union Bank of India, but never "Meta" for some Meta… Ltd.
+  // Words may be abbreviated: "Alembic Pharma" is Alembic Pharmaceuticals.
+  const prefixOk = allowPrefix && (key.includes(' ') || key.length >= 6)
+  const keyWords = key.split(' ')
+  for (const { row, name } of SEARCHABLE) {
+    if (name === key) return row
+    if (!prefixOk) continue
+    const words = name.split(' ')
+    const matches =
+      words.length >= keyWords.length &&
+      // Only the last of several words may be abbreviated; a single word must
+      // be a whole word, so "Update" is never Updater Services.
+      keyWords.every((w, i) =>
+        i < keyWords.length - 1 || keyWords.length === 1 ? words[i] === w : words[i].startsWith(w) && w.length >= 4
+      )
+    if (matches && (!best || row.name.length < best.name.length)) best = row
+  }
+  return best
+}
+
+/**
+ * Listed companies a headline is about, beyond the NIFTY 50 names the rule
+ * engine already recognises: the headline's subject ("Union Bank of India Q2
+ * net profit rises…", "Multibagger stock: PC Jeweller shares jump…"), plus any
+ * capitalised name in it that is exactly a listed company ("SEBI continues
+ * curbs on gold refiner Rajesh Exports"). Server-only, like the directory.
+ */
+export function findListedCompaniesIn(text: string, knownSymbols: string[] = []): DirectoryEntry[] {
+  const found = new Map<string, DirectoryEntry>()
+  for (const symbol of knownSymbols) {
+    const row = BY_SYMBOL.get(symbol)
+    if (row) found.set(row.symbol, row)
+  }
+  // "Zydus Lifesciences (NSE:ZYDUSLIFE) secures…" names its own ticker.
+  for (const m of text.matchAll(/\bNSE:\s*([A-Z0-9&-]{2,20})\b/g)) {
+    const row = BY_SYMBOL.get(m[1])
+    if (row && !NIFTY_BY_SYMBOL.has(row.symbol)) found.set(row.symbol, row)
+  }
+  const clean = text.replace(/^\s*(live\s*\|?|breaking:?)\s*/i, '').replace(/^\s*india['’]s\s+/i, '')
+  // The subject before the first verb or label, and the same after a colon
+  // ("Multibagger stock: PC Jeweller shares jump").
+  const segments = [clean, ...clean.split(':').slice(1, 2)]
+  for (const segment of segments) {
+    const subject = segment.trim().split(SUBJECT_STOP)[0].replace(/\b(ltd|limited)\.?$/i, '').trim()
+    if (subject.length < 3 || subject.split(' ').length > 6) continue
+    const hit = phraseHit(subject, true)
+    if (hit && !NIFTY_BY_SYMBOL.has(hit.symbol)) found.set(hit.symbol, hit)
+  }
+  // Capitalised runs anywhere, matched exactly.
+  for (const m of clean.matchAll(/\b([A-Z][\w&.-]*(?:\s+[A-Z][\w&.-]*)+)\b/g)) {
+    const hit = phraseHit(m[1], false)
+    if (hit && !NIFTY_BY_SYMBOL.has(hit.symbol)) found.set(hit.symbol, hit)
+  }
+  return Array.from(found.values()).slice(0, 4)
+}
+
+/**
+ * The listed company a headline leads with, when it is outside the NIFTY 50:
+ * "Avantel wins ₹20 crore order from L&T" is Avantel's news, though L&T is
+ * the index name in it.
+ */
+export function listedSubjectOf(text: string): DirectoryEntry | null {
+  const clean = text.replace(/^\s*(live\s*\|?|breaking:?)\s*/i, '').replace(/^\s*india['’]s\s+/i, '')
+  const subject = clean.trim().split(SUBJECT_STOP)[0].replace(/\b(ltd|limited)\.?$/i, '').trim()
+  if (subject.length < 3 || subject.split(' ').length > 6) return null
+  // An index company's everyday name ("IndiGo") is that company, not a
+  // listed namesake ("IndiGo Paints").
+  if (findCompanies(subject).companies.length > 0) return null
+  const hit = phraseHit(subject, true)
+  return hit && !NIFTY_BY_SYMBOL.has(hit.symbol) ? hit : null
 }

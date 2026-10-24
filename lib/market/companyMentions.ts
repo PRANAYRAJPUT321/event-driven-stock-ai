@@ -99,9 +99,12 @@ const OUTSIDE: Record<string, string> = {
   'indian oil': 'IOC', hpcl: 'HINDPETRO', gail: 'GAIL', 'vodafone idea': 'IDEA', suzlon: 'SUZLON', ireda: 'IREDA', rvnl: 'RVNL',
   irfc: 'IRFC', bhel: 'BHEL', sail: 'SAIL', nmdc: 'NMDC', dlf: 'DLF', 'divis': 'DIVISLAB', "divi's": 'DIVISLAB', lupin: 'LUPIN',
   'tvs motor': 'TVSMOTOR', 'ashok leyland': 'ASHOKLEY', 'avenue supermarts': 'DMART', dmart: 'DMART', 'info edge': 'NAUKRI',
-  'muthoot finance': 'MUTHOOTFIN', 'shree cement': 'SHREECEM', ambuja: 'AMBUJACEM', 'pidilite': 'PIDILITIND', dabur: 'DABUR',
+  'itc hotels': 'ITCHOTELS', 'muthoot finance': 'MUTHOOTFIN', 'shree cement': 'SHREECEM', ambuja: 'AMBUJACEM', 'pidilite': 'PIDILITIND', dabur: 'DABUR',
   'godrej consumer': 'GODREJCP', havells: 'HAVELLS', siemens: 'SIEMENS', polycab: 'POLYCAB', dixon: 'DIXON', biocon: 'BIOCON',
 }
+
+/** Phrases that contain a company's name but mean something else. */
+const NOT_COMPANIES = ['input tax credit (itc)', 'input tax credit', 'itc claim', 'itc claims', 'claim itc', 'itc infotech', 'bank holiday', 'bank holidays', 'state bank of pakistan', 'titan submarine']
 
 interface Pattern {
   phrase: string
@@ -113,6 +116,7 @@ const PATTERNS: (Pattern & { re: RegExp })[] = ([
   ...Object.entries(ALIASES).flatMap(([symbol, names]) => names.map((phrase) => ({ phrase, symbols: [symbol] }))),
   ...Object.entries(GROUPS).map(([phrase, symbols]) => ({ phrase, symbols })),
   ...Object.entries(OUTSIDE).map(([phrase, symbol]) => ({ phrase, symbols: [] as string[], outside: symbol })),
+  ...NOT_COMPANIES.map((phrase) => ({ phrase, symbols: [] as string[], outside: '' })),
   ] as Pattern[])
   // Longest first: the specific name wins over any shorter one inside it.
   .sort((a, b) => b.phrase.length - a.phrase.length)
@@ -141,7 +145,7 @@ export function findCompanies(text: string): CompanyMentions {
     while ((m = p.re.exec(rest))) {
       const at = m.index + m[1].length
       if (p.outside) outside.push({ at, symbol: p.outside, phrase: p.phrase })
-      else found.push({ at, symbols: p.symbols })
+      else if (p.symbols.length > 0) found.push({ at, symbols: p.symbols })
       // Blank the span so shorter names inside it do not match again.
       rest = rest.slice(0, at) + ' '.repeat(m[0].length - m[1].length) + rest.slice(at + m[0].length - m[1].length)
       p.re.lastIndex = at + 1

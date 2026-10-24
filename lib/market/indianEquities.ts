@@ -84,8 +84,8 @@ export const NIFTY_50: EquityConstituent[] = [
   { symbol: 'SUNPHARMA', name: 'Sun Pharmaceutical', sector: 'Pharma', industry: 'Healthcare', isin: 'INE044A01036' },
   { symbol: 'CIPLA', name: 'Cipla', sector: 'Pharma', industry: 'Healthcare', isin: 'INE059A01026' },
   { symbol: 'DRREDDY', name: "Dr. Reddy's Laboratories", sector: 'Pharma', industry: 'Healthcare', isin: 'INE089A01031' },
-  { symbol: 'APOLLOHOSP', name: 'Apollo Hospitals', sector: 'Pharma', industry: 'Healthcare', isin: 'INE437A01024' },
-  { symbol: 'MAXHEALTH', name: 'Max Healthcare', sector: 'Pharma', industry: 'Healthcare', isin: 'INE027H01010' },
+  { symbol: 'APOLLOHOSP', name: 'Apollo Hospitals', sector: 'Healthcare', industry: 'Healthcare', isin: 'INE437A01024' },
+  { symbol: 'MAXHEALTH', name: 'Max Healthcare', sector: 'Healthcare', industry: 'Healthcare', isin: 'INE027H01010' },
 
   // Metals & materials
   { symbol: 'TATASTEEL', name: 'Tata Steel', sector: 'Metals', industry: 'Metals & Mining', isin: 'INE081A01020' },

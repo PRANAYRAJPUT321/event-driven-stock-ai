@@ -259,7 +259,7 @@ export function guestHasData(): boolean {
  * analyses saved in this browser by an older engine are re-run when opened
  * instead of showing a read the app no longer stands behind.
  */
-export const ENGINE_VERSION = 2
+export const ENGINE_VERSION = 3
 
 function analysisFields(result: any): Row {
   const top = result.stocks?.[0]

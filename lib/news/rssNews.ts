@@ -199,6 +199,7 @@ const SECTOR_QUERIES: Record<string, string> = {
   Auto: '("Indian auto sector" OR "car sales India" OR Maruti OR "auto stocks India")',
   FMCG: '("FMCG India" OR "consumer goods India" OR ITC OR "Hindustan Unilever")',
   Pharma: '("Indian pharma" OR "pharma stocks India" OR USFDA India)',
+  Healthcare: '("hospital stocks India" OR "Apollo Hospitals" OR "Max Healthcare")',
   Metals: '("metal stocks India" OR "steel India" OR "Tata Steel" OR JSW)',
   Realty: '("Indian real estate" OR "realty stocks India" OR "housing sales India")',
   Telecom: '("Indian telecom" OR Airtel OR Jio OR "telecom tariff India")',

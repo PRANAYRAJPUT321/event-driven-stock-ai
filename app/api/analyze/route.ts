@@ -4,6 +4,9 @@ import { classifyEvent, generateCounterArgument } from '@/lib/ai/eventClassifier
 import { assessEvent, buildCounterArgumentFromRules, type EventAssessment } from '@/lib/ai/ruleClassifier'
 import { analyseImpact, impactScore, type ImpactDirection } from '@/lib/ai/impactAnalyzer'
 import { fetchStockMetricsMany, valuationBenchmarks, type StockMetrics } from '@/lib/market/realMetrics'
+import { findListedCompaniesIn, listedSubjectOf, type DirectoryEntry } from '@/lib/market/nseDirectory'
+import { sectorFromTradingView } from '@/lib/market/sectorMap'
+import { PROFILE_COLUMNS, str as tvStr, tvScan, tvTicker } from '@/lib/market/tradingView'
 import {
   getHistoricalReactions,
   historicalReturnToScore,
@@ -64,8 +67,35 @@ export async function POST(request: NextRequest) {
     // "Crude oil crashed by 25%" — whose verb the rules did not know — as a
     // crude SPIKE. See assessEvent for each verdict.
     const assessment = assessEvent(event)
-    const ruleRead = assessment.classification
-    const refusal = refusalFor(event, assessment, requestedSymbols.length > 0)
+    // News about a listed company outside the NIFTY 50 — most company news —
+    // is scored on that company, found by name in the NSE directory.
+    const companyNews =
+      requestedSymbols.length === 0 &&
+      (assessment.scope === 'company' || assessment.themeScope === 'mixed') &&
+      ['ok', 'needs_company', 'outside_universe', 'no_sector'].includes(assessment.verdict)
+    // The company a headline leads with wins over an index name later in it.
+    const subject = companyNews && assessment.companies.length > 0 ? listedSubjectOf(event) : null
+    const listed = subject
+      ? await withSectors([subject])
+      : companyNews && assessment.companies.length === 0
+        ? await withSectors(findListedCompaniesIn(event, assessment.outside.map((o) => o.symbol)))
+        : []
+    const ruleRead =
+      listed.length > 0
+        ? {
+            ...assessment.classification,
+            affected_sectors: Array.from(new Set(listed.map((c) => c.sector))),
+            companies: listed.map((c) => c.symbol),
+          }
+        : assessment.classification
+    // A listed company found by name answers "which company?", but not
+    // "which way?": a results preview is still refused for want of one.
+    const refusal =
+      listed.length > 0
+        ? assessment.directionStated
+          ? null
+          : refusalFor(event, { ...assessment, verdict: 'no_direction' }, false)
+        : refusalFor(event, assessment, requestedSymbols.length > 0)
     if (refusal) return NextResponse.json(refusal, { status: 422 })
 
     // Whether we can persist is a separate question from whether we can
@@ -164,8 +194,10 @@ export async function POST(request: NextRequest) {
     const candidates: EquityConstituent[] =
       requested.length > 0
         ? requested
-        : assessment.scope === 'company' && assessment.companies.length > 0
-          ? assessment.companies.slice(0, MAX_STOCKS_REQUESTED)
+        : listed.length > 0
+          ? listed
+          : assessment.scope === 'company' && assessment.companies.length > 0
+            ? assessment.companies.slice(0, MAX_STOCKS_REQUESTED)
           : Array.from(
               new Map(
                 [
@@ -179,7 +211,7 @@ export async function POST(request: NextRequest) {
     // Named by the classification but absent from this universe — reported so
     // the page can say "no NIFTY 50 name is exposed to Aviation" rather than
     // quietly showing an unrelated company in its place.
-    const unmatchedSectors = sectorsWithoutConstituents(sectors)
+    const unmatchedSectors = listed.length > 0 ? [] : sectorsWithoutConstituents(sectors)
 
     // Map to database ids where the table has them, so a signed-in analysis
     // can still be watchlisted and stored against a real row.
@@ -214,6 +246,7 @@ export async function POST(request: NextRequest) {
       title: event,
       sectors,
       companies: candidates.map((c) => ({ symbol: c.symbol, name: c.name, sector: c.sector })),
+      ...(listed.length > 0 ? { named: listed } : {}),
     })
     const impactBySymbol = new Map(
       candidates.map((c, i) => {
@@ -514,8 +547,8 @@ function refusalFor(event: string, a: EventAssessment, symbolsChosen: boolean) {
         ? null
         : make(
             'NEEDS_COMPANY',
-            `${q} reads as ${a.label}${/news$/.test(a.label ?? '') ? '' : ' news'} but doesn’t name a company, and this kind of event reaches only the company it is about. ` +
-              'Name one of the NIFTY 50 companies PULSE scores — for example “Infosys Q2 profit beats estimates”.'
+            `${q} reads as ${a.label}${/news$/.test(a.label ?? '') ? '' : ' news'}, but PULSE found no company listed in India in it, and this kind of event reaches only the company it is about. ` +
+              'Name an NSE-listed company — for example “Infosys Q2 profit beats estimates”.'
           )
     case 'outside_universe':
       return make(
@@ -541,4 +574,28 @@ function refusalFor(event: string, a: EventAssessment, symbolsChosen: boolean) {
               'Name the sector or company it affects — for example “…; impact on FMCG companies”.'
           )
   }
+}
+
+/**
+ * Listed companies outside the NIFTY 50 that the event names, with the
+ * engine's sector for each from the screener's own classification ('Other'
+ * when it maps to none, which leaves valuation benchmarked on the index).
+ */
+async function withSectors(entries: DirectoryEntry[]): Promise<EquityConstituent[]> {
+  if (entries.length === 0) return []
+  let rows = new Map<string, Record<string, unknown>>()
+  try {
+    rows = await tvScan('india', entries.map((e) => tvTicker(e.symbol)), PROFILE_COLUMNS, { ttlSeconds: 120 })
+  } catch {
+    // Without the screener the company is still scored, against the index.
+  }
+  return entries.map((e) => {
+    const row = rows.get(tvTicker(e.symbol))
+    return {
+      symbol: e.symbol,
+      name: e.name.replace(/\s+(Ltd\.?|Limited)$/i, ''),
+      sector: sectorFromTradingView(tvStr(row?.sector), tvStr(row?.industry), e.name) ?? 'Other',
+      isin: e.isin,
+    }
+  })
 }

@@ -19,7 +19,9 @@ interface NewsItem {
   published_at: string
 }
 
-const SECTOR_FILTERS = ['All', 'Banking', 'IT', 'Energy', 'Auto', 'NBFC', 'Realty', 'FMCG', 'Pharma']
+// Sectors the engine actually assigns: "NBFC" and "Realty" were offered here
+// but never emitted, so those filters always came back empty.
+const SECTOR_FILTERS = ['All', 'Banking', 'Financials', 'IT', 'Energy', 'Auto', 'FMCG', 'Pharma', 'Metals', 'Telecom', 'Aviation', 'Defence']
 
 export default function Discover() {
   const router = useRouter()

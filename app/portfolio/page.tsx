@@ -68,12 +68,16 @@ export default function Portfolio() {
 
     const withPnl: PositionWithPnl[] = rows.map((p: Position) => {
       const currentPrice = prices[p.symbol]?.price ?? null
+      // Acting on an AVOID call is a paper short: the call is right, and the
+      // position in profit, when the price falls. Marking every position as
+      // a purchase showed a wrong AVOID call as a gain.
+      const side = isShort(p.recommendation) ? -1 : 1
       return {
         ...p,
         currentPrice,
         pnlPct:
           currentPrice !== null && p.entry_price > 0
-            ? ((currentPrice - p.entry_price) / p.entry_price) * 100
+            ? (side * (currentPrice - p.entry_price) / p.entry_price) * 100
             : null,
       }
     })
@@ -119,8 +123,9 @@ export default function Portfolio() {
         <p className="text-xs font-mono uppercase tracking-widest text-accent-bright mb-2">Paper trading</p>
         <h1 className="text-2xl sm:text-3xl font-bold text-ink mb-1">Simulated Portfolio</h1>
         <p className="text-ink-muted text-sm">
-          Hypothetical positions from &quot;Simulate&quot; on an event&apos;s recommended stocks, marked to live
-          market prices. Paper trading only — no real money changes hands.
+          Hypothetical positions from &quot;Simulate&quot; on an event&apos;s scored stocks, marked to live market
+          prices: BUY and HOLD calls are held long, AVOID calls short. Paper trading only — no real money changes
+          hands.
         </p>
       </div>
 
@@ -182,6 +187,12 @@ export default function Portfolio() {
                       {p.symbol}
                     </button>
                     <RecommendationBadge rec={p.recommendation} size="sm" />
+                    <span
+                      className="text-[10px] font-mono uppercase tracking-wide text-ink-faint"
+                      title={isShort(p.recommendation) ? 'Paper short: gains when the price falls' : 'Paper long: gains when the price rises'}
+                    >
+                      {isShort(p.recommendation) ? 'Short' : 'Long'}
+                    </span>
                     {p.event_analysis_id && (
                       <button
                         onClick={() => router.push(`/events/${p.event_analysis_id}`)}
@@ -222,4 +233,9 @@ export default function Portfolio() {
       </div>
     </AppShell>
   )
+}
+
+/** An AVOID call is acted on by being short the stock. */
+function isShort(recommendation: string | null | undefined): boolean {
+  return recommendation === 'AVOID'
 }

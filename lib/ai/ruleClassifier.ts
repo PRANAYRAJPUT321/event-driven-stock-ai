@@ -34,7 +34,7 @@ import type { EquityConstituent } from '../market/indianEquities'
 
 type Sector =
   | 'Banking' | 'IT' | 'Energy' | 'Auto' | 'FMCG' | 'Pharma' | 'Financials'
-  | 'Metals' | 'Telecom' | 'Utilities' | 'Engineering' | 'Defence' | 'Cement'
+  | 'Metals' | 'Telecom' | 'Utilities' | 'Engineering' | 'Defence' | 'Cement' | 'Healthcare'
   | 'Chemicals' | 'Consumer' | 'Retail' | 'Diversified' | 'Aviation' | 'Ports'
 
 export type Polarity = 'up' | 'down' | 'neutral'
@@ -69,13 +69,15 @@ interface Theme {
    * out" — the theme reads it itself. null falls back to the generic words.
    */
   polarity?: (text: string) => Polarity | null
+  /** Read direction only from the channel's own polarity, never from generic words. */
+  ownPolarityOnly?: boolean
   /** Whether "neutral" is a real state of this channel (rates held) rather than "not said". */
   hasNeutral?: boolean
   /**
    * The constituents this channel actually reaches, when that is narrower
    * than their sector: gold reaches a jeweller, not every consumer company.
    */
-  focus?: string[]
+  focus?: string[] | ((text: string) => string[])
   /**
    * Given the direction the underlying variable moved, the market read.
    * `sectors` are the ones whose earnings this channel actually touches.
@@ -119,7 +121,9 @@ const UP_PLAIN = [
   'rose', 'risen', 'shot up', 'went up', 'gone up', 'grew', 'grown', 'tops', 'topped', 'higher', 'up',
   'strong', 'stronger', 'record high', 'all-time high', 'all time high', 'lifetime high', 'fresh high',
   'new high', '52-week high', 'bullish', 'uptick', 'upswing', 'upturn', 'boom', 'better than expected',
-  'goes up', 'costlier', 'pricier', 'dearer',
+  'goes up', 'costlier', 'pricier', 'dearer', 'in the green', 'bulls return', 'margin expansion', 'margins expand',
+  'extend gains', 'extends gains', 'extended gains', 'winning streak', 'high', 'highs', 'elevated', 'soaring', 'spiking',
+  'recovers', 'holds up', 'crosses', 'milestone', 'rebounds',
   'above estimates', 'above expectations', 'ahead of estimates',
 ]
 const DOWN_VERBS = [
@@ -127,14 +131,17 @@ const DOWN_VERBS = [
   'weaken', 'miss', 'shrink', 'narrow', 'downgrade', 'ease', 'cool', 'soften', 'slow', 'moderate',
   'decelerate', 'dip', 'sink', 'sag', 'slide', 'tank', 'plummet', 'collapse', 'erode', 'shed', 'lose',
   'depreciate', 'underperform', 'halve', 'trim', 'retreat', 'nosedive', 'skid', 'slip', 'deteriorate',
-  'contract', 'go down', 'come down',
+  'contract', 'go down', 'come down', 'drag',
 ]
 const DOWN_PLAIN = [
   'fell', 'fallen', 'sank', 'sunk', 'slid', 'lost', 'shrank', 'shrunk', 'went down', 'down', 'weak',
   'weaker', 'record low', 'all-time low', 'all time low', 'lifetime low', 'fresh low', 'new low',
   '52-week low', 'bearish', 'downturn', 'slowdown', 'selloff', 'sell-off', 'bloodbath', 'meltdown',
   'sluggish', 'tepid', 'worse than expected', 'below estimates', 'below expectations', 'contraction',
-  'freefall', 'free fall', 'goes down', 'comes down', 'came down', 'slower', 'cheaper',
+  'freefall', 'free fall', 'goes down', 'comes down', 'came down', 'slower', 'cheaper', 'in the red',
+  'profit booking', 'profit-taking', 'under pressure', 'muted', 'subdued', 'bears tighten grip',
+  'extend losses', 'extends losses', 'extended losses', 'losing streak', 'selling pressure', 'weekly loss',
+  'weekly losses', 'snaps rally', 'snap rally', 'low', 'lows', 'losses', 'lead losses', 'fizzles', 'weigh', 'weighs',
 ]
 // "contracts" is also a noun ("L&T wins contracts"); the verb is read only as
 // "contracted"/"contracting" via DOWN_PLAIN-style handling below.
@@ -214,10 +221,23 @@ function keywordRe(needle: string): RegExp {
   return re
 }
 
+/**
+ * Distinct keyword matches. A phrase and the words inside it ("crude oil",
+ * "crude", "oil") are one mention, not three — counting them separately let
+ * a passing "amid crude oil surge" outvote the Sensex the headline was about.
+ */
 function countKeywords(text: string, needles: string[]): number {
-  let count = 0
-  for (const needle of needles) if (keywordRe(needle).test(text)) count++
-  return count
+  const spans: [number, number][] = []
+  for (const needle of needles) {
+    const re = new RegExp(keywordRe(needle).source, 'gi')
+    let m: RegExpExecArray | null
+    while ((m = re.exec(text))) spans.push([m.index + m[1].length, m.index + m[0].length])
+  }
+  spans.sort((a, b) => b[1] - b[0] - (a[1] - a[0]))
+  const taken: [number, number][] = []
+  for (const [a, b] of spans) if (!taken.some(([x, y]) => a < y && b > x)) taken.push([a, b])
+  // Repeats of the same word are one mention as well.
+  return new Set(taken.map(([a, b]) => text.slice(a, b).replace(/e?s$/, ''))).size
 }
 
 function has(text: string, needles: string[]): boolean {
@@ -253,6 +273,65 @@ export function detectPolarity(text: string): Polarity {
   return up.first < down.first ? 'up' : 'down'
 }
 
+/**
+ * The direction of the movement word closest to the channel's own words.
+ *
+ * Headlines often carry two moves — the event and the market's reaction to
+ * it: "Markets rally as RBI announces surprise rate cut". Counting both, or
+ * taking the first, read that as a rate HIKE. The move that describes the
+ * channel is the one next to it.
+ */
+/** Where one clause of a headline ends and its cause or contrast begins. */
+const CLAUSE_BREAK =
+  /\s+(?:as|after|amid|despite|while|but|even as|though|although|since|because|on|following|ahead of|due to|led by|driven by|even though|whereas)\s+|\s*[;:|—–]\s*|,\s+/g
+
+function localPolarity(text: string, keywords: string[]): Polarity | null {
+  // Only moves in the clause that names the channel describe it: "Indian
+  // equities extend losses | as Brent crude hits a six-month high".
+  const bounds: [number, number][] = []
+  let start = 0
+  for (const m of text.matchAll(CLAUSE_BREAK)) {
+    bounds.push([start, m.index!])
+    start = m.index! + m[0].length
+  }
+  bounds.push([start, text.length])
+  for (const [from, to] of bounds) {
+    const found = nearestMove(text.slice(from, to), keywords)
+    if (found) return found
+  }
+  return null
+}
+
+function nearestMove(text: string, keywords: string[]): Polarity | null {
+  const anchors: [number, number][] = []
+  for (const k of keywords) {
+    const re = new RegExp(`(^|[^a-z0-9])${escapeRegExp(k)}(?:s|es)?(?=$|[^a-z0-9])`, 'gi')
+    let m: RegExpExecArray | null
+    while ((m = re.exec(text))) anchors.push([m.index + m[1].length, m.index + m[0].length])
+  }
+  if (anchors.length === 0) return null
+  let best: { d: number; dir: Polarity } | null = null
+  const consider = (words: string[], dir: Polarity) => {
+    for (const word of words) {
+      const re = moveRe(word)
+      re.lastIndex = 0
+      let m: RegExpExecArray | null
+      while ((m = re.exec(text))) {
+        const at = m.index + m[1].length
+        const end = at + m[0].length - m[1].length
+        if (NEGATOR_RE.test(text.slice(Math.max(0, at - 40), at))) continue
+        // A move inside the channel's own phrase ("rate cut") counts as nearest.
+        const d = Math.min(...anchors.map(([a, b]) => (at >= b ? at - b : end <= a ? a - end + 1 : 0)))
+        if (!best || d < best.d) best = { d, dir }
+      }
+    }
+  }
+  consider(UP_WORDS, 'up')
+  consider(DOWN_WORDS, 'down')
+  const found = best as { d: number; dir: Polarity } | null
+  return found && found.d <= 60 ? found.dir : null
+}
+
 /** Counts of positive and negative event words for a company channel. */
 function tally(text: string, positive: RegExp, negative: RegExp): Polarity | null {
   const pos = (text.match(positive) || []).length
@@ -260,6 +339,14 @@ function tally(text: string, positive: RegExp, negative: RegExp): Polarity | nul
   if (pos === neg) return null
   return pos > neg ? 'up' : 'down'
 }
+
+/** Rules that change how the market itself trades, which land on the exchange. */
+const MARKET_STRUCTURE =
+  /\b(f&o|derivatives?|futures|options|expiry|lot size|margin rules?|settlement|trading hours|algo trading|stock exchanges?|exchange fees?|transaction charges?|stt)\b/
+
+/** "Does not cut", "unlikely to hike": the decision is to hold. */
+const NEGATED_RATE_MOVE =
+  /\b(not|no|never|unlikely to|won't|wont|doesn't|didn't|rules? out|ruled out|holds? off( on)?|held off( on)?|refrains? from|skips?)\s+(\w+\s+){0,2}(cut|cuts|cutting|hike|hikes|hiking|raise|raising|change|changing|move)\b/
 
 const FOREIGN_CENTRAL_BANK = /\b(fed|federal reserve|fomc|powell|ecb|european central bank|bank of england|bank of japan|boj|pboc|us central bank)\b/
 const INDIAN_POLICY = /\b(rbi|reserve bank|repo|mpc|india|indian|crr|slr|das|malhotra)\b/
@@ -276,14 +363,29 @@ const THEMES: Theme[] = [
       'repo rate', 'reverse repo', 'policy rate', 'interest rate', 'monetary policy', 'rbi mpc', 'mpc',
       'monetary policy committee', 'crr', 'cash reserve ratio', 'slr', 'rate hike', 'rate cut',
       'benchmark rate', 'lending rate', 'rbi policy', 'repo', 'rate decision', 'policy review', 'key rate',
-      'cuts rates', 'cut rates', 'hikes rates', 'hike rates', 'raises rates', 'raise rates',
+      'cuts rates', 'cut rates', 'hikes rates', 'hike rates', 'raises rates', 'raise rates', 'rate panel',
+      'rate-setting', 'rate setters', 'rate-setters', 'rbi governor',
     ],
     weakKeywords: ['rbi', 'rates', 'reserve bank'],
     baseMagnitude: 70,
     scope: 'macro',
     hasNeutral: true,
-    excludeIf: (text) => FOREIGN_CENTRAL_BANK.test(text) && !INDIAN_POLICY.test(text),
-    polarity: (text) => (/\bhawkish\b/.test(text) ? 'up' : /\b(dovish|accommodative)\b/.test(text) ? 'down' : null),
+    // "GST council cuts rates" is a tax change, not monetary policy.
+    excludeIf: (text) =>
+      (FOREIGN_CENTRAL_BANK.test(text) && !INDIAN_POLICY.test(text)) ||
+      (/\b(gst|tax|taxes|duty|duties|tariffs?|toll)\b/.test(text) && !/\b(rbi|repo|mpc|reserve bank|policy rate|interest rates?)\b/.test(text)),
+    polarity: (text) => {
+      if (/\bhawkish\b/.test(text)) return 'up'
+      if (/\b(dovish|accommodative)\b/.test(text)) return 'down'
+      if (HOLD_RE.test(text) && !/\b(cut|cuts|hike|hikes|raise|raises)\b/.test(text)) return 'neutral'
+      if (NEGATED_RATE_MOVE.test(text)) return 'neutral'
+      const rate = localPolarity(text, ['repo rate', 'policy rate', 'interest rate', 'rate hike', 'rate cut', 'repo', 'rates', 'rate'])
+      if (rate) return rate
+      // Liquidity operations: adding money is easing, draining it tightening.
+      if (/\b(inject\w*|infus\w*|liquidity (boost|support|injection)|variable rate repo|vrr auction|omo purchase)\b/.test(text)) return 'down'
+      if (/\b(drain\w*|absorb\w*|variable rate reverse repo|vrrr|liquidity squeeze)\b/.test(text)) return 'up'
+      return null
+    },
     resolve: (polarity) =>
       polarity === 'up'
         ? {
@@ -322,9 +424,13 @@ const THEMES: Theme[] = [
     polarity: (text) =>
       /\b(hawkish|higher[- ]for[- ]longer|tighter for longer)\b/.test(text)
         ? 'up'
-        : /\b(dovish|pivot|easing cycle)\b/.test(text)
+        : /\b(dovish|pivot|easing cycle)\b/.test(text) || /\bsignals? (\w+ ){0,3}cuts?\b/.test(text)
           ? 'down'
-          : null,
+          : /\bsignals? (\w+ ){0,3}(hikes?|increases?)\b/.test(text)
+            ? 'up'
+            : (HOLD_RE.test(text) && !/\b(cut|cuts|hike|hikes|raise|raises)\b/.test(text)) || NEGATED_RATE_MOVE.test(text)
+              ? 'neutral'
+              : null,
     resolve: (polarity) =>
       polarity === 'up'
         ? {
@@ -348,18 +454,63 @@ const THEMES: Theme[] = [
             },
   },
   {
+    id: 'energy_tax',
+    label: 'windfall tax on energy producers',
+    eventType: 'GOVERNMENT_POLICY',
+    economicVariable: 'FISCAL',
+    keywords: ['windfall tax', 'windfall levy', 'windfall', 'special additional excise duty'],
+    baseMagnitude: 60,
+    scope: 'macro',
+    focus: ['ONGC', 'RELIANCE'],
+    polarity: (text) => (/\b(scrap\w*|abolish\w*|remov\w*|withdr\w*|cut|cuts|lower\w*|reduc\w*|ends?|ended)\b/.test(text) ? 'down' : 'up'),
+    resolve: (polarity) =>
+      polarity === 'down'
+        ? {
+            direction: 'POSITIVE',
+            sectors: ['Energy'],
+            mechanism: 'Removing or cutting a windfall tax lets crude producers keep more of every barrel’s price, lifting earnings directly.',
+          }
+        : {
+            direction: 'NEGATIVE',
+            sectors: ['Energy'],
+            mechanism: 'A windfall tax takes a share of crude producers’ realisations above a threshold price, so higher oil prices no longer reach their earnings in full.',
+          },
+  },
+  {
+    id: 'fuel_price',
+    label: 'retail fuel prices',
+    eventType: 'COMMODITY_SHOCK',
+    economicVariable: 'FUEL_PRICE',
+    keywords: ['petrol price', 'diesel price', 'fuel price', 'petrol', 'diesel', 'pump price', 'cng price', 'lpg price'],
+    baseMagnitude: 50,
+    scope: 'macro',
+    focus: ['MARUTI', 'M&M', 'BAJAJ-AUTO', 'EICHERMOT', 'TMPV', 'RELIANCE'],
+    resolve: (polarity) =>
+      polarity === 'up'
+        ? {
+            direction: 'NEGATIVE',
+            sectors: ['Auto', 'Energy'],
+            mechanism:
+              'Higher pump prices raise vehicle running costs and freight costs and take spending power from households, while fuel retailers earn a wider marketing margin.',
+          }
+        : {
+            direction: 'POSITIVE',
+            sectors: ['Auto', 'Energy'],
+            mechanism:
+              'Lower pump prices cut vehicle running costs and freight costs and leave households more to spend, while fuel retailers give up part of their marketing margin.',
+          },
+  },
+  {
     id: 'crude',
     label: 'crude oil price',
     eventType: 'COMMODITY_SHOCK',
     economicVariable: 'OIL_PRICE',
     keywords: [
-      'crude', 'crude oil', 'oil price', 'brent', 'wti', 'opec', 'opec+', 'petrol price', 'diesel price',
-      'fuel price', 'petrol', 'diesel', 'natural gas', 'lng', 'jet fuel', 'atf', 'barrel',
+      'crude', 'crude oil', 'oil price', 'brent', 'wti', 'opec', 'opec+', 'natural gas', 'lng', 'jet fuel', 'atf', 'barrel', 'oil',
     ],
-    weakKeywords: ['oil'],
     baseMagnitude: 65,
     scope: 'macro',
-    excludeIf: (text) => /\b(edible|palm|cooking|mustard|vegetable|sunflower|soybean) oil\b/.test(text),
+    excludeIf: (text) => /\b(edible|palm|cooking|mustard|vegetable|sunflower|soybean) oil\b|\bwindfall\b/.test(text),
     // "OPEC cuts output" means crude goes UP: a supply cut is a price rise.
     polarity: (text) => {
       const supplyCut =
@@ -367,7 +518,7 @@ const THEMES: Theme[] = [
       const supplyRise =
         /\b(raise|raises|boost|boosts|increase|increases|hike|hikes)\s+(oil\s+|crude\s+)?(output|production|supply)\b|\b(output|production|supply)\s+(hike|increase|boost)\b/
       const stripped = text.replace(supplyCut, ' ').replace(supplyRise, ' ')
-      const generic = detectPolarity(stripped)
+      const generic = localPolarity(stripped, ['crude', 'oil', 'brent', 'wti', 'barrel', 'natural gas', 'lng', 'atf', 'opec']) ?? 'neutral'
       if (generic !== 'neutral') return generic
       if (supplyCut.test(text)) return 'up'
       if (supplyRise.test(text)) return 'down'
@@ -479,12 +630,15 @@ const THEMES: Theme[] = [
     ],
     baseMagnitude: 55,
     scope: 'macro',
+    // Weather bulletins ("heavy rain", "low-pressure area") say nothing about
+    // the season's total; only the channel's own words do.
+    ownPolarityOnly: true,
     // IMD's own bands: below 96% of the long-period average is below normal
     // or deficient; 96% and above is normal or better.
     polarity: (text) => {
       const pct = text.match(/(\d{2,3}(?:\.\d+)?)\s*(?:%|per ?cent)\s*(?:of\s*(?:the\s*)?)?(?:long[- ]period average|lpa)/)
       if (pct) return Number(pct[1]) >= 96 ? 'up' : 'down'
-      if (/deficien|below[- ]normal|deficit|drought|delayed|weak monsoon|erratic|dry spell|el nino|failed monsoon/.test(text)) return 'down'
+      if (/deficien|below[- ]normal|deficit|drought|delayed|weak monsoon|erratic|dry spell|el nino|failed monsoon|drier|heatwave|scanty|rain shortfall/.test(text)) return 'down'
       if (/above[- ]normal|surplus|excess|normal monsoon|good monsoon|bountiful|la nina|early onset|healthy/.test(text)) return 'up'
       return null
     },
@@ -567,6 +721,7 @@ const THEMES: Theme[] = [
       'export ban', 'export curb', 'trade talks', 'trade tension', 'reciprocal tariff', 'h-1b', 'h1b',
       'work visa', 'sanctions on india',
     ],
+    weakKeywords: ['exports', 'export', 'imports'],
     baseMagnitude: 62,
     scope: 'macro',
     // The variable is the height of the barrier: tariffs imposed is up, a
@@ -576,10 +731,21 @@ const THEMES: Theme[] = [
         text,
         /\b(impose|imposes|imposed|imposing|slap|slaps|hike|hikes|raise|raises|raised|higher|new tariff|ban|bans|curb|curbs|war|tension|tensions|threaten|threatens|fee)\b/g,
         /\b(deal|agreement|fta|roll ?back|rolls back|remove|removes|removed|lift|lifts|lifted|exempt|exempts|exemption|cut|cuts|lower|lowers|reduce|reduces|truce|pause|paused)\b/g
-      ),
+      ) ??
+      (/\b(h-?1b|work visas?)\b/.test(text) && /\b(fees?|restrict\w*|curbs?|crackdown|plunge\w*|caps?|trump|tighten\w*|ban\w*)\b/.test(text) ? 'up' : null) ??
+      // Exports rising is the barrier effectively falling for exporters.
+      (/\bexports?\b/.test(text) && !/\b(tariffs?|ban|curbs?)\b/.test(text)
+        ? (localPolarity(text, ['exports', 'export']) === 'up' ? 'down' : localPolarity(text, ['exports', 'export']) === 'down' ? 'up' : null)
+        : null) ??
+      // Tariffs or sanctions named with no rollback are barriers going up;
+      // the market falling on them ("Sensex falls as tariffs weigh") is the
+      // reaction, not the direction of the barrier.
+      (/\b(tariffs?|anti-dumping|sanctions?|bans?|curbs?|visa fee)\b/.test(text) ? 'up' : null),
     resolve: (polarity, text) => {
       const services = /\b(h-?1b|visa|outsourcing|services)\b/.test(text)
-      const sectors: Sector[] = services ? ['IT'] : ['Pharma', 'Auto', 'Metals', 'Chemicals', 'IT']
+      // A tariff on one product reaches its makers, not every exporter.
+      const named = detectSectors(text).filter((s) => ['Pharma', 'Auto', 'Metals', 'Chemicals', 'IT', 'Energy', 'FMCG', 'Consumer'].includes(s))
+      const sectors: Sector[] = named.length > 0 ? named : services ? ['IT'] : ['Pharma', 'Auto', 'Metals', 'Chemicals']
       return polarity === 'down'
         ? {
             direction: 'POSITIVE',
@@ -600,10 +766,20 @@ const THEMES: Theme[] = [
     label: 'global markets',
     eventType: 'GLOBAL_MARKET_SHOCK',
     economicVariable: 'GLOBAL_RISK',
-    keywords: ['wall street', 'nasdaq', 'dow jones', 's&p 500', 'global markets', 'global stocks', 'world markets', 'asian markets', 'us markets', 'us stocks', 'china economy', 'foreign investors', 'fii', 'fpi', 'global sell-off', 'us recession'],
+    keywords: [
+      'wall street', 'nasdaq', 'dow jones', 's&p 500', 'global markets', 'global stocks', 'world markets', 'asian markets',
+      'us markets', 'us stocks', 'china economy', 'foreign investors', 'fii', 'fpi', 'global sell-off', 'us recession',
+      'kospi', 'nikkei', 'hang seng', 'stoxx', 'stoxx 600', 'ftse', 'dax', 'cac 40', 'shanghai composite', 'european shares',
+      'european stocks', 'asian stocks',
+    ],
     baseMagnitude: 60,
     scope: 'macro',
-    polarity: (text) => (/\b(outflows?|sell-?off|recession)\b/.test(text) ? 'down' : /\binflows?\b/.test(text) ? 'up' : null),
+    polarity: (text) =>
+      /\b(outflows?|sell-?off|recession|sell|sells|sold|selling|sellers?|pull(s|ed)? out|dump\w*)\b/.test(text)
+        ? 'down'
+        : /\b(inflows?|buy|buys|bought|buying|net buyers?|invest|invests|invested|pour\w*)\b/.test(text)
+          ? 'up'
+          : null,
     resolve: (polarity) =>
       polarity === 'down'
         ? {
@@ -634,10 +810,12 @@ const THEMES: Theme[] = [
     baseMagnitude: 68,
     scope: 'macro',
     // A war does not "rise"; it breaks out. The variable is the level of
-    // risk: escalation is up, a ceasefire or peace is down.
+    // risk, read only from the words for it: "tensions weigh on sentiment"
+    // is risk present, not risk falling.
+    ownPolarityOnly: true,
     polarity: (text) => {
-      const calmer = /\b(ceasefire|cease-fire|truce|peace|de-?escalat\w*|ends? (the )?war|withdraw\w*|lifts? sanctions|sanctions (lifted|eased)|talks progress|accord)\b/.test(text)
-      const worse = /\b(war|attack\w*|invasion|invades?|missiles?|airstrikes?|strikes?|struck|escalat\w*|hostilities|blockade|clash\w*|tensions? (rise|rises|escalate|flare)|sanctions|terror\w*|conflict|military action)\b/.test(text)
+      const calmer = /\b(ceasefire|cease-fire|truce|peace|de-?escalat\w*|ends? (the )?war|withdraw\w*|lifts? sanctions|sanctions (lifted|eased)|talks progress|accord|tensions? (ease|eased|easing|cool\w*|subside\w*|fade\w*))\b/.test(text)
+      const worse = /\b(war|attack\w*|invasion|invades?|missiles?|airstrikes?|strikes?|struck|escalat\w*|hostilities|blockade|clash\w*|tensions?|sanctions|terror\w*|conflict|military action|unrest|crisis|risks? (rise|rises|mount\w*))\b/.test(text)
       if (calmer) return 'down'
       if (worse) return 'up'
       return null
@@ -690,20 +868,28 @@ const THEMES: Theme[] = [
     eventType: 'REGULATORY',
     economicVariable: 'REGULATION',
     keywords: [
-      'sebi', 'regulator', 'regulation', 'regulatory', 'norms', 'penalty', 'probe', 'investigation', 'ban', 'banned',
+      'sebi', 'regulator', 'markets regulator', 'market regulator', 'capital markets regulator', 'regulation', 'regulatory', 'norms', 'penalty', 'probe', 'investigation', 'ban', 'banned',
       'compliance', 'licence', 'license', 'antitrust', 'cci', 'trai', 'usfda', 'fda', 'import curb', 'warning letter',
       'import alert', 'fine', 'fined', 'crackdown', 'irdai', 'dgca', 'cdsco', 'fssai', 'show cause', 'restrictions',
     ],
     baseMagnitude: 55,
     scope: 'mixed',
+    // Capital-market rules land on the listed exchange first.
+    focus: (text) => (MARKET_STRUCTURE.test(text) ? ['BSE'] : []),
     // Tighter rules or an enforcement action is up; relief is down.
-    polarity: (text) =>
-      /\b(relax\w*|eases? norms|eased norms|lifts? (the )?ban|lifted|removes? curbs|approv\w*|clears?|cleared|allows?|allowed|permits?|exempt\w*|relief|withdraws? (the )?(order|notice))\b/.test(text)
-        ? 'down'
-        : 'up',
+    polarity: (text) => {
+      if (/\b(relax\w*|eases?|eased|easing|exclusivity|grants?|granted|lifts? (the )?ban|lifted|removes? curbs|approv\w*|clears?|cleared|allows?|allowed|permits?|exempt\w*|relief|clean chit|nod|green signal|quash\w*|dismiss\w*|acquit\w*|exonerat\w*|withdraws? (the )?(order|notice))\b/.test(text)) return 'down'
+      // "Shares surge after the SEBI order" tells us how the market read it.
+      if (/\b(shares?|stocks?)\b/.test(text) && localPolarity(text, ['shares', 'share', 'stock', 'stocks']) === 'up') return 'down'
+      // Tightening needs an action; a speech or a consultation is not one.
+      if (/\b(bans?|banned|penalt\w*|fines?|fined|probe\w*|investigat\w*|orders?|curbs?|restrict\w*|tighten\w*|crackdown|suspend\w*|warning letter|import alert|show[- ]cause|notice|bars?|barred|caps?|capped|mandat\w*|stricter|halts?|halted|revok\w*|cancel\w*|raids?)\b/.test(text)) return 'up'
+      return null
+    },
     resolve: (polarity, text) => {
       const sectors: Sector[] = []
-      if (/\b(sebi|f&o|derivatives|mutual funds?|stock exchanges?|brokers?|trading)\b/.test(text)) sectors.push('Financials')
+      // SEBI action against one unlisted firm reaches no listed company;
+      // market-structure rules reach the exchange.
+      if (MARKET_STRUCTURE.test(text) || /\bmutual funds?\b/.test(text)) sectors.push('Financials')
       if (/\b(usfda|fda|cdsco|drugs?|warning letter|import alert|pharma\w*)\b/.test(text)) sectors.push('Pharma')
       if (/\b(trai|dot|spectrum|telecom)\b/.test(text)) sectors.push('Telecom')
       if (/\b(rbi|reserve bank|banks?|banking|nbfcs?|lenders?|loans?)\b/.test(text)) sectors.push('Banking', 'Financials')
@@ -790,11 +976,21 @@ const THEMES: Theme[] = [
     keywords: [
       'sensex', 'nifty', 'nifty 50', 'bank nifty', 'stock market', 'share market', 'equity market', 'equities',
       'dalal street', 'market crash', 'bull run', 'bear market', 'market correction', 'india vix',
+      'indian markets', 'indian shares', 'indian equities', 'indian stocks', 'domestic markets', 'benchmark indices',
     ],
     weakKeywords: ['markets', 'market'],
     baseMagnitude: 55,
     scope: 'macro',
-    polarity: (text) => (/\b(bull run|bull market)\b/.test(text) ? 'up' : /\b(bear market|correction|crash)\b/.test(text) ? 'down' : null),
+    polarity: (text) => {
+      if (/\b(bull run|bull market|bulls)\b/.test(text)) return 'up'
+      if (/\b(bear market|correction|crash|bears)\b/.test(text)) return 'down'
+      // The volatility index rises when markets fall: a VIX spike is fear.
+      if (/\bvix\b/.test(text)) {
+        const p = localPolarity(text, ['vix'])
+        return p === 'up' ? 'down' : p === 'down' ? 'up' : null
+      }
+      return null
+    },
     resolve: (polarity) =>
       polarity === 'down'
         ? {
@@ -818,11 +1014,14 @@ const THEMES: Theme[] = [
     eventType: 'EARNINGS',
     economicVariable: 'CORPORATE',
     keywords: [
-      'earnings', 'results', 'quarterly results', 'q1', 'q2', 'q3', 'q4', 'quarter', 'net profit', 'profit',
-      'revenue', 'guidance', 'margin', 'ebitda', 'profit after tax', 'topline', 'bottomline', 'net loss',
-      'estimates', 'eps', 'quarterly profit', 'annual results',
+      'earnings', 'results', 'quarterly results', 'net profit', 'profit', 'revenue', 'guidance', 'margin',
+      'ebitda', 'profit after tax', 'topline', 'bottomline', 'net loss', 'eps', 'quarterly profit', 'annual results',
+      'nii', 'net interest income', 'aum', 'asset quality', 'same-store sales', 'q1', 'q2', 'q3', 'q4',
+      'q1fy', 'q2fy', 'q3fy', 'q4fy',
     ],
-    weakKeywords: ['loss', 'pat'],
+    weakKeywords: ['loss', 'pat', 'quarter', 'estimates'],
+    // Economic data uses the same words ("GDP grows 7.8% in Q1, beats estimates").
+    excludeIf: (text) => /\b(gdp|cpi|wpi|iip|pmi|inflation|unemployment|trade deficit|current account|fiscal deficit|economy|economic growth)\b/.test(text),
     baseMagnitude: 55,
     scope: 'company',
     hasNeutral: true,
@@ -831,10 +1030,12 @@ const THEMES: Theme[] = [
       if (/\bloss(es)?\b[^.]{0,30}\b(narrow\w*|shrink\w*|shrank|halv\w*|reduc\w*)/.test(text)) return 'up'
       if (/\b(swings?|swung|slips?|slipped) (in)?to (a )?(net )?loss|\b(posts?|reports?|posted|reported) (a )?(net )?loss|\binto the red\b/.test(text)) return 'down'
       if (/\b(swings?|swung|returns?|returned) to (a )?profit|\bturns? profitable\b/.test(text)) return 'up'
+      if (/\bprofit\b[^.]{0,60}\b(vs|versus|against|from)\b[^.]{0,40}\bloss\b/.test(text)) return 'up'
+      if (/\bloss\b[^.]{0,60}\b(vs|versus|against|from)\b[^.]{0,40}\bprofit\b/.test(text)) return 'down'
       const verdict = tally(
         text,
-        /\b(beat|beats|tops|topped|above (street )?(estimates|expectations)|better than expected|record (profit|revenue)|raises? (its )?guidance|upgrades? guidance)\b/g,
-        /\b(miss|misses|missed|below (street )?(estimates|expectations)|worse than expected|disappoint\w*|cuts? (its )?guidance|lowers? (its )?guidance|warns?|profit warning)\b/g
+        /\b(beat|beats|tops|topped|above (street )?(estimates|expectations)|better than expected|record (profit|revenue)|raises? (its )?guidance|upgrades? guidance|healthy|robust|stellar|strong (growth|quarter|show|numbers))\b/g,
+        /\b(miss|misses|missed|below (street )?(estimates|expectations)|worse than expected|disappoint\w*|cuts? (its )?guidance|lowers? (its )?guidance|warns?|profit warning|margins? (contract\w*|shrink\w*|narrow\w*|compress\w*|declin\w*|fell|fall\w*)|margin pressure|volume growth (flat|stagnant|muted)|flat volumes?)\b/g
       )
       return verdict
     },
@@ -870,7 +1071,12 @@ const THEMES: Theme[] = [
     baseMagnitude: 40,
     scope: 'company',
     hasNeutral: true,
-    polarity: (text) => (/\b(cancel\w*|scrap\w*|defer\w*|skip\w*|omit\w*)\b/.test(text) ? 'down' : 'up'),
+    polarity: (text) =>
+      /\b(cancel\w*|scrap\w*|defer\w*|skip\w*|omit\w*)\b/.test(text)
+        ? 'down'
+        : /\?|\b(will|likely|may|might|expected to|preview|ahead of)\b/.test(text) && !/\b(declares?|declared|announces?|announced|approves?|approved)\b/.test(text)
+          ? null
+          : 'up',
     resolve: (polarity) =>
       polarity === 'down'
         ? {
@@ -912,7 +1118,7 @@ const THEMES: Theme[] = [
     scope: 'company',
     hasNeutral: true,
     polarity: (text) =>
-      /\b(resign\w*|steps? down|stepped down|quits?|quit|sacked|fired|ousted|removed|exits?|abrupt\w*|arrest\w*)\b/.test(text) ? 'down' : 'up',
+      /\b(resign\w*|steps? down|stepped down|quits?|quit|sacked|fired|ousted|removed|exits?|abrupt\w*|arrest\w*|outgoing|leaving|departure|retire\w*)\b/.test(text) ? 'down' : 'up',
     resolve: (polarity) =>
       polarity === 'down'
         ? {
@@ -938,17 +1144,19 @@ const THEMES: Theme[] = [
       'volumes', 'deliveries', 'fraud', 'allegation', 'scam', 'raid', 'default', 'fire', 'strike', 'outage', 'recall',
       'plant', 'expansion', 'capacity', 'tariff hike', 'price hike', 'mobile tariff', 'subscribers', 'market share',
       'ipo', 'listing', 'block deal', 'promoter', 'pledge', 'insolvency', 'bankruptcy', 'lawsuit', 'short seller',
-      'hindenburg', 'target price', 'layoff', 'job cuts', 'shutdown', 'factory', 'new product',
+      'hindenburg', 'target price', 'layoff', 'job cuts', 'shutdown', 'factory', 'new product', 'commissions',
+      'commissioned', 'mw', 'delivers', 'deliveries', 'bookings', 'flights', 'cancellation', 'cancels', 'suspends',
+      'grounded', 'leak', 'data leak', 'investigates', 'milestone', 'partnership',
     ],
-    weakKeywords: ['company', 'announces', 'firm'],
+    weakKeywords: ['company', 'firm'],
     baseMagnitude: 50,
     scope: 'company',
     polarity: (text) => {
       const lower = text
       const events = tally(
         lower,
-        /\b(wins?|won|bags?|bagged|secures?|secured|order wins?|new orders?|launch\w*|expan\w*|approv\w*|record (sales|volumes|deliveries)|tariff hikes?|price hikes?|raises? (\w+ )?(prices|tariffs)|hikes? (\w+ )?(prices|tariffs)|upgrade\w*|buy rating|target (price )?raised|market share gains?|profit jumps?)\b/g,
-        /\b(fraud\w*|allegations?|scam|raids?|probe|defaults?|fire|strike|outage|recall\w*|penalt\w*|fined?|lawsuit|short seller|hindenburg|downgrade\w*|sell rating|target (price )?cut|pledge\w*|insolvency|bankruptcy|resign\w*|layoffs?|job cuts|shutdown|halts?|suspend\w*|warning letter|import alert|banned|loses|lost|cuts? (\w+ )?prices)\b/g
+        /\b(wins?|won|bags?|bagged|secures?|secured|order wins?|new orders?|launch\w*|expan\w*|approv\w*|commission(s|ed)?|ipo|listing gains?|value unlocking|record high|deliver\w*|bookings|milestone|partnership|(large|mega|major|significant|big|fresh) orders?|orders? worth|to build|record (sales|volumes|deliveries)|tariff hikes?|price hikes?|raises? (\w+ )?(prices|tariffs)|hikes? (\w+ )?(prices|tariffs)|upgrade\w*|buy rating|target (price )?raised|market share gains?|profit jumps?)\b/g,
+        /\b(fraud\w*|allegations?|scam|raids?|probe|investigat\w*|leak\w*|cancel\w*|grounded|disrupt\w*|defaults?|fire|strike|outage|recall\w*|promoters? (sells?|sold|offload\w*|pledge\w*)|offloads?|stake sale|dilut\w*|penalt\w*|fined?|lawsuit|short seller|hindenburg|downgrade\w*|sell rating|target (price )?cut|pledge\w*|insolvency|bankruptcy|resign\w*|layoffs?|job cuts|shutdown|halts?|suspend\w*|warning letter|import alert|banned|loses|lost|cuts? (\w+ )?prices)\b/g
       )
       const moves = detectPolarity(lower)
       if (moves !== 'neutral') return moves
@@ -984,13 +1192,19 @@ const SECTOR_KEYWORDS: Record<Sector, string[]> = {
   Energy: ['oil and gas', 'refiner', 'refining', 'oil marketing', 'omc', 'energy sector', 'energy stock', 'upstream', 'oil producer', 'oil companies'],
   Auto: ['auto', 'car', 'auto sector', 'auto stock', 'automobile', 'automaker', 'carmaker', 'car sales', 'two-wheeler', 'passenger vehicle', 'electric vehicle', 'vehicle sales', 'tractor'],
   FMCG: ['fmcg', 'consumer goods', 'staples', 'consumer staples', 'packaged food'],
-  Pharma: ['pharma', 'pharmaceutical', 'drugmaker', 'healthcare', 'hospital', 'generic drug', 'medicine'],
-  Financials: ['nbfc', 'financial services', 'insurance', 'insurer', 'lending', 'broker', 'brokerage', 'mutual fund', 'asset management', 'stock exchange', 'capital market', 'fintech', 'microfinance'],
+  Pharma: ['pharma', 'pharmaceutical', 'drugmaker', 'generic drug', 'medicine', 'branded drug', 'drug'],
+  Healthcare: ['healthcare', 'hospital', 'hospital chain', 'diagnostics'],
+  Financials: ['nbfc', 'financial services', 'insurance', 'insurer', 'lending', 'stock broking', 'mutual fund', 'asset management', 'stock exchange', 'capital market', 'fintech', 'microfinance'],
   Metals: ['steel', 'metal', 'aluminium', 'aluminum', 'copper', 'iron ore', 'mining', 'zinc', 'steelmaker'],
   Telecom: ['telecom', 'telco', 'spectrum', 'mobile tariff', '5g'],
   Utilities: ['power sector', 'electricity', 'power demand', 'discom', 'renewable', 'solar', 'power tariff', 'power generation'],
   Engineering: ['capital goods', 'infrastructure', 'construction', 'engineering', 'railway', 'road', 'highway', 'metro rail'],
-  Defence: ['defence', 'defense', 'military', 'armed forces', 'army', 'missile', 'drone', 'fighter jet'],
+  Defence: [
+    'defence stock', 'defense stock', 'defence sector', 'defence companies', 'defence firms', 'defence psu',
+    'defence order', 'defence contract', 'defence deal', 'defence exports', 'defence budget', 'defence spending',
+    'defence ministry', 'defence procurement', 'military', 'armed forces', 'missile', 'drone', 'fighter jet',
+    'defence industry', 'defense industry', 'nifty india defence',
+  ],
   Cement: ['cement'],
   Chemicals: ['chemical', 'specialty chemicals', 'petrochemical', 'fertiliser', 'fertilizer'],
   Consumer: ['consumer demand', 'discretionary', 'consumption', 'paint', 'jewellery', 'jewelry', 'consumer durables'],
@@ -999,6 +1213,21 @@ const SECTOR_KEYWORDS: Record<Sector, string[]> = {
   Aviation: ['aviation', 'airline', 'air fare', 'airfare', 'air travel', 'airport', 'flight'],
   Ports: ['port', 'shipping', 'cargo', 'logistics', 'freight'],
 }
+
+/** NSE sector indices, and the sector each one tracks. */
+const SECTOR_INDICES: [RegExp, Sector][] = [
+  [/\b(nifty bank|bank nifty|nifty psu bank|nifty private bank)\b/, 'Banking'],
+  [/\bnifty it\b/, 'IT'],
+  [/\bnifty auto\b/, 'Auto'],
+  [/\bnifty pharma\b/, 'Pharma'],
+  [/\bnifty healthcare\b/, 'Healthcare'],
+  [/\bnifty metal\b/, 'Metals'],
+  [/\bnifty fmcg\b/, 'FMCG'],
+  [/\bnifty energy|nifty oil (&|and) gas\b/, 'Energy'],
+  [/\bnifty (india )?defence\b/, 'Defence'],
+  [/\bnifty financial services\b/, 'Financials'],
+  [/\bnifty consumer durables\b/, 'Consumer'],
+]
 
 /** Words that mean this text is about Indian markets at all. */
 const INDIA_MARKET_KEYWORDS = [
@@ -1019,18 +1248,29 @@ interface ThemeMatch {
   score: number
 }
 
-function bestTheme(text: string, companiesNamed: boolean): ThemeMatch | null {
-  let best: ThemeMatch | null = null
+function firstKeywordAt(text: string, needles: string[]): number {
+  let first = Infinity
+  for (const needle of needles) {
+    const m = keywordRe(needle).exec(text)
+    if (m) first = Math.min(first, m.index + m[1].length)
+  }
+  return first
+}
+
+function bestTheme(text: string): ThemeMatch | null {
+  let best: (ThemeMatch & { at: number }) | null = null
   for (const theme of THEMES) {
     if (theme.excludeIf?.(text)) continue
-    let score = countKeywords(text, theme.keywords) + countKeywords(text, theme.weakKeywords ?? []) * 0.5
+    const score = countKeywords(text, theme.keywords) + countKeywords(text, theme.weakKeywords ?? []) * 0.5
     if (score === 0) continue
-    // Named companies tip a tie towards the company channels: "Airtel raises
-    // mobile tariffs" is Airtel's pricing, not trade policy.
-    if (companiesNamed && theme.scope !== 'macro') score += 0.5
-    if (!best || score > best.score) best = { theme, score }
+    const at = firstKeywordAt(text, [...theme.keywords, ...(theme.weakKeywords ?? [])])
+    // On a tie, the channel the headline leads with is its subject: "Gold
+    // edges lower as investors weigh Fed signals" is about gold, "Rupee
+    // climbs as Jio IPO inflows…" about the rupee, "Airtel raises mobile
+    // tariffs" about Airtel's pricing rather than trade policy.
+    if (!best || score > best.score || (score === best.score && at < best.at)) best = { theme, score, at }
   }
-  return best
+  return best ? { theme: best.theme, score: best.score } : null
 }
 
 /** A percentage or basis-point figure signals a concrete, sized event. */
@@ -1047,13 +1287,26 @@ function sizeBoost(text: string): number {
   return (pct >= 20 ? 14 : pct >= 10 ? 9 : pct >= 5 ? 5 : 0) + (bp >= 50 ? 6 : 0)
 }
 
+/**
+ * Whether a sector is the subject ("Pharma stocks fall", "banks rally"),
+ * rather than a word in passing ("UCB shares jump after demand for a drug").
+ * Only then can a company-news headline that names no company be read for
+ * the sector's companies.
+ */
+/** "US bank stocks", "China's pharma stocks": a sector, but not India's. */
+const FOREIGN_SECTOR_RE =
+  /\b(us|u\.s\.|american|uk|british|europe\w*|china\w*|chinese|japan\w*|korea\w*|german|french|wall street|global|asian|swedish|swiss)['’]?s?\s+(\w+\s+){0,1}(bank|banking|tech|it|pharma|auto|metal|steel|chip|energy|oil)\w*\s+(stocks?|shares?|companies|firms)\b/
+
+const SECTOR_SUBJECT_RE =
+  /\b(bank|banking|psu bank|private bank|it|tech|auto|pharma|healthcare|hospital|fmcg|metal|steel|cement|power|energy|oil|telecom|defence|defense|realty|infra|infrastructure|capital goods|chemical|financial|nbfc|insurance|aviation|airline|consumer|retail|psu|smallcap|midcap)\s+(stocks?|shares?|companies|firms|sector|names|majors|counters|index|pack|space|cos)\b|\b(banks|lenders|automakers|carmakers|drugmakers|airlines|insurers|telcos|steelmakers|refiners|jewellers|it firms|it companies|nbfcs)\b/
+
 /** Words that describe something happening, for text that names no channel. */
 const EVENT_SIGNAL_RE =
-  /\b(announc\w*|launch\w*|reports?|reported|posts?|posted|results?|profits?|loss(es)?|revenue|sales|orders?|contracts?|deals?|wins?|won|bags?|secures?|signs?|approv\w*|ipo|listing|stake|fire|strike|recall\w*|fraud|allegations?|raids?|probe|defaults?|outage|shutdown|expansion|capacity|merger|acquir\w*|bankruptcy|insolvency|fined?|penalty|resign\w*|appoint\w*|hikes?|cuts?|tariffs?|prices?|ban(s|ned)?|crash\w*|rall(y|ies|ied))\b/
+  /\b(announc\w*|launch\w*|reports?|reported|posts?|posted|results?|profits?|loss(es)?|revenue|sales|orders?|contracts?|deals?|wins?|won|bags?|secures?|signs?|approv\w*|ipo|listing|stake|commission\w*|deliver\w*|cancel\w*|suspend\w*|investigat\w*|fire|strike|recall\w*|fraud|allegations?|raids?|probe|defaults?|outage|shutdown|expansion|capacity|merger|acquir\w*|bankruptcy|insolvency|fined?|penalty|resign\w*|appoint\w*|hikes?|cuts?|tariffs?|prices?|ban(s|ned)?|crash\w*|rall(y|ies|ied))\b/
 
 /** Text asking for advice rather than describing an event. */
 const ADVICE_RE =
-  /\b(should i|shall i|can i|is it (a )?(good|right|safe|wise)|good time to|worth (buying|investing)|buy or sell|recommend|which stock|best stock|what about)\b/
+  /\b(should i|shall i|can i|is it (a )?(good|right|safe|wise)|good time to|worth (buying|investing)|buy or sell|recommend\w*|which stocks?|best stocks?|what about|stocks to (buy|watch)|top (\d+ )?stocks|shares to (buy|watch)|stock picks?|how to|what is|what are|which is better|is better|better buy|best \w+ stocks?|top \d+ (\w+ ){0,3}(stocks?|shares|picks)|stocks? to (invest|buy)|to invest in|\d+ (stock )?ideas|top picks|upside potential|up to \d+% upside|picks)\b/
 
 export type EventVerdict =
   /** A recognised event with somewhere to trace it. */
@@ -1088,6 +1341,10 @@ export interface EventAssessment {
   mentionedSectors: string[]
   /** Symbols the channel reaches when narrower than its sectors. */
   focus: string[]
+  /** False when the channel's direction is never stated in the text. */
+  directionStated: boolean
+  /** The channel's own scope, before any company is found ('mixed' can become 'company'). */
+  themeScope: ThemeScope | null
 }
 
 const ASSESS_CACHE = new Map<string, EventAssessment>()
@@ -1101,8 +1358,19 @@ export function assessEvent(eventText: string): EventAssessment {
   return result
 }
 
+/** Market idioms whose words would read the wrong way one by one. */
+function normalise(text: string): string {
+  return text
+    .replace(/\bsnap(s|ped)?\s+(?:[\w-]+\s+){0,3}?(rally|winning streak|gains?)\b/g, 'snaps rally')
+    .replace(/\b(trim|trims|trimmed|pare|pares|pared|recoup|recoups|recouped)\s+(?:[\w-]+\s+){0,3}?losses\b/g, 'recovers')
+    .replace(/\b(trim|trims|trimmed|pare|pares|pared)\s+(?:[\w-]+\s+){0,3}?gains\b/g, 'slips')
+    .replace(/\bfail(s|ed)? to (derail|dent|hurt|stop)\b/g, 'holds up')
+    .replace(/\brally\s+(fizzles?|fades?|peters?|evaporates?|loses steam)(\s+out)?\b/g, 'fizzles')
+    .replace(/\b(loses?|lost) steam\b/g, 'fizzles')
+}
+
 function assess(eventText: string): EventAssessment {
-  const text = eventText.toLowerCase().replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim()
+  const text = normalise(eventText.toLowerCase().replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim())
   const { companies, outside } = findCompanies(text)
   const mentionedSectors = detectSectors(text)
   const latin = /[a-z]/.test(text)
@@ -1110,11 +1378,14 @@ function assess(eventText: string): EventAssessment {
   // emoji alone are not a language, just not an event.
   const otherScript = !latin && /\p{L}/u.test(text)
 
-  let match = bestTheme(text, companies.length > 0 || outside.length > 0)
+  let match = bestTheme(text)
   const genericPolarity = detectPolarity(text)
   const eventSignal = EVENT_SIGNAL_RE.test(text) || genericPolarity !== 'neutral'
 
-  // "Infosys jumps 6%" names no channel word but is plainly company news.
+  // "Infosys jumps 6%" names no channel word but is plainly company news, and
+  // so is "TCS turns to mid-market clients as AI erodes demand", whose only
+  // channel word is a passing "market".
+  if (match && match.score < 1 && match.theme.scope === 'macro' && companies.length > 0) match = null
   if (!match && (companies.length > 0 || outside.length > 0) && eventSignal) {
     match = { theme: THEMES.find((t) => t.id === 'company_news')!, score: 0.5 }
   }
@@ -1124,6 +1395,8 @@ function assess(eventText: string): EventAssessment {
     outside,
     mentionedSectors,
     focus: [] as string[],
+    directionStated: false,
+    themeScope: null as ThemeScope | null,
   }
 
   if (!match) {
@@ -1140,7 +1413,15 @@ function assess(eventText: string): EventAssessment {
 
   const { theme } = match
   const themed = theme.polarity?.(text) ?? null
-  const polarity: Polarity = themed ?? genericPolarity
+  const polarity: Polarity =
+    themed ??
+    (theme.ownPolarityOnly
+      ? 'neutral'
+      : theme.scope === 'company'
+        ? genericPolarity
+        : // Only a move in the channel's own clause counts: "Sectoral indices
+          // slide as crude nears $114" says nothing about which way crude went.
+          localPolarity(text, [...theme.keywords, ...(theme.weakKeywords ?? [])]) ?? 'neutral')
   let outcome = theme.resolve(polarity, text)
 
   const scope: 'company' | 'macro' =
@@ -1148,7 +1429,11 @@ function assess(eventText: string): EventAssessment {
 
   // Whether "neutral" is a real state for this channel or just "not said".
   const directionSensitive = theme.resolve('up', text).direction !== theme.resolve('down', text).direction
-  const unstated = polarity === 'neutral' && directionSensitive && !theme.hasNeutral
+  // A hold ("rates unchanged") is a real state only when the text says so; a
+  // headline that merely mentions the RBI ("List of RBI Governors…") is not
+  // a rate decision.
+  const saidNeutral = theme.hasNeutral && themed === 'neutral'
+  const unstated = polarity === 'neutral' && directionSensitive && !saidNeutral
   if (unstated) {
     outcome = {
       direction: 'NEUTRAL',
@@ -1165,6 +1450,9 @@ function assess(eventText: string): EventAssessment {
   // named ("bank earnings beat estimates"). Macro channels reach their own
   // sectors plus any the text names, plus the named companies' sectors.
   const companySectors = companies.map((c) => c.sector as Sector)
+  // "Nifty Auto falls 8%" is the auto sector moving, not the whole market.
+  const indexSectors = SECTOR_INDICES.filter(([re]) => re.test(text)).map(([, sector]) => sector)
+  if (theme.id === 'market_move' && indexSectors.length > 0) outcome = { ...outcome, sectors: indexSectors }
   const sectors: Sector[] =
     scope === 'company'
       ? Array.from(new Set<Sector>(companies.length > 0 ? companySectors : (mentionedSectors as Sector[])))
@@ -1223,25 +1511,31 @@ function assess(eventText: string): EventAssessment {
   }
 
   let verdict: EventVerdict = 'ok'
-  if (scope === 'company' && companies.length === 0 && mentionedSectors.length === 0) {
+  if (
+    ADVICE_RE.test(text) &&
+    (polarity === 'neutral' ||
+      /\bstocks? to (buy|watch|invest)|top \d+ (\w+ ){0,3}(stocks?|shares|picks)|stock picks?|how to|\d+ (stock )?ideas|top picks\b/.test(text))
+  ) {
+    // A question or a watch-list ("Stocks to watch: Infosys, HDFC Bank") is
+    // not an event, whatever channel words it contains.
+    verdict = 'not_event'
+  } else if (
+    scope === 'company' &&
+    companies.length === 0 &&
+    (outside.length > 0 || mentionedSectors.length === 0 || !SECTOR_SUBJECT_RE.test(text) || FOREIGN_SECTOR_RE.test(text))
+  ) {
     verdict = outside.length > 0 ? 'outside_universe' : 'needs_company'
   } else if (unstated) {
     verdict = 'no_direction'
   } else if (sectors.length === 0) {
     verdict = outside.length > 0 ? 'outside_universe' : 'no_sector'
-  } else if (
-    // A question about a company ("should I buy Reliance?") that happens to
-    // contain a channel word is still a request for advice, not an event.
-    ADVICE_RE.test(text) &&
-    match.score < 1.5 &&
-    polarity === 'neutral'
-  ) {
-    verdict = 'not_event'
   }
 
   return {
     ...base,
-    focus: theme.focus ?? [],
+    focus: (typeof theme.focus === 'function' ? theme.focus(text) : theme.focus) ?? [],
+    directionStated: !unstated,
+    themeScope: theme.scope,
     verdict,
     classification,
     channel: theme.id,
