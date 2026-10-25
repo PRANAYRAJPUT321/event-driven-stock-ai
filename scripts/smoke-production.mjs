@@ -161,7 +161,7 @@ for (const event of ['Brent crude jumps 10% after supply cuts in the Middle East
 // ── Pages ──
 for (const [path, expect] of [
   ['/', ''],
-  ['/auth/login', 'Sign'],
+  ['/auth/login', 'PULSE'],
   ['/markets', 'heatmap'],
   ['/analyze', 'Analy'],
   ['/discover', 'News'],

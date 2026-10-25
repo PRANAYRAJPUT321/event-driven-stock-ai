@@ -137,7 +137,9 @@ await visit('analyze-anonymous', '/analyze', {
   act: async (page) => {
     await page.fill('textarea', 'Brent crude jumps 10% after supply cuts in the Middle East')
     await page.click('button[type="submit"]')
-    await page.waitForSelector('text=Scored Stocks', { timeout: 60000 })
+    // A visitor's analysis is saved in their browser and opens on its own page.
+    await page.waitForURL('**/events/**', { timeout: 60000 })
+    await page.waitForSelector('text=Top Affected Stocks', { timeout: 60000 })
     await page.waitForTimeout(2500)
   },
 })
