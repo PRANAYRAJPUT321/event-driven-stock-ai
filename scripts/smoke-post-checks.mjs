@@ -36,6 +36,7 @@ if (existsSync(`${dir}/headlines.json`)) {
     i += Math.max(n, 1)
   }
 }
+if (existsSync(`${dir}/journey.txt`)) await post('smoke-journey', 'Full journey', readFileSync(`${dir}/journey.txt`, 'utf8'))
 if (existsSync(`${dir}/audit.txt`)) await post('smoke-audit', 'Production audit', readFileSync(`${dir}/audit.txt`, 'utf8'))
 for (const f of readdirSync(dir).filter((f) => f.startsWith('thumb-') && f.endsWith('.b64'))) {
   const name = f.slice('thumb-'.length, -'.b64'.length)

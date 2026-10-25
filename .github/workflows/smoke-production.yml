@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches: [claude/event-driven-stock-ai-tj6oic]
-    paths: [scripts/smoke-news.mjs, scripts/smoke-audit.mjs, scripts/smoke-production.mjs, scripts/smoke-production-ui.mjs, scripts/smoke-post-checks.mjs, .github/workflows/smoke-production.yml]
+    paths: [scripts/smoke-journey.mjs, scripts/smoke-news.mjs, scripts/smoke-audit.mjs, scripts/smoke-production.mjs, scripts/smoke-production-ui.mjs, scripts/smoke-post-checks.mjs, .github/workflows/smoke-production.yml]
 permissions:
   contents: read
   checks: write
@@ -29,6 +29,12 @@ jobs:
           cp "$GITHUB_WORKSPACE/scripts/smoke-audit.mjs" /tmp/pw/audit.mjs
           cd /tmp/pw && node audit.mjs
           mkdir -p "$GITHUB_WORKSPACE/smoke-out" && cp -r /tmp/pw/smoke-out/* "$GITHUB_WORKSPACE/smoke-out/"
+      - name: Full journey in Chrome (phone and desktop)
+        continue-on-error: true
+        run: |
+          cp "$GITHUB_WORKSPACE/scripts/smoke-journey.mjs" /tmp/pw/journey.mjs
+          cd /tmp/pw && WIDTH=390 node journey.mjs; WIDTH=1440 node journey.mjs
+          mkdir -p "$GITHUB_WORKSPACE/smoke-out" && cp /tmp/pw/smoke-out/journey.txt "$GITHUB_WORKSPACE/smoke-out/"
       - name: Endpoints
         run: node scripts/smoke-production.mjs
         env:
